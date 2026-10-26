@@ -17,6 +17,22 @@ public static class UserClaims
         new Claim(ClaimTypes.Role, user.Role.ToString()),
     ], scheme));
 
+    /// <summary>
+    /// True if the sign-in still matches an active account in the database
+    /// (same id, username and role). Used to end sessions for deleted, disabled or changed accounts.
+    /// </summary>
+    public static bool StillValid(ClaimsPrincipal? principal, WavePOS.Data.UserRepository users)
+    {
+        if (principal?.Identity?.IsAuthenticated != true) return false;
+        var claimed = principal.ToUser();
+        if (claimed.Id <= 0) return false;
+
+        var current = users.GetById(claimed.Id);
+        return current is { IsActive: true }
+            && string.Equals(current.Username, claimed.Username, StringComparison.OrdinalIgnoreCase)
+            && current.Role == claimed.Role;
+    }
+
     public static User ToUser(this ClaimsPrincipal principal) => new()
     {
         Id = long.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : 0,

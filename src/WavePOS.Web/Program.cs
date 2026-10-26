@@ -22,6 +22,18 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.AccessDeniedPath = "/";
         options.ExpireTimeSpan = TimeSpan.FromHours(12);
         options.SlidingExpiration = true;
+
+        // On every request, check the signed-in account still exists, is active and hasn't changed.
+        // Otherwise a deleted/disabled user (or a cookie from another database) would stay signed in.
+        options.Events.OnValidatePrincipal = async context =>
+        {
+            var users = context.HttpContext.RequestServices.GetRequiredService<UserRepository>();
+            if (!UserClaims.StillValid(context.Principal, users))
+            {
+                context.RejectPrincipal();
+                await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            }
+        };
     });
 builder.Services.AddAuthorization(options =>
     options.AddPolicy(UserClaims.ManagerPolicy, policy => policy.RequireRole(nameof(WavePOS.Core.Models.UserRole.Manager))));
