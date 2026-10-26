@@ -1,0 +1,110 @@
+<Window x:Class="WavePOS.Desktop.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:WavePOS.Desktop.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:LoginViewModel}"
+        Title="WAVE POS — Sign in" WindowState="Maximized" Width="1100" Height="720"
+        WindowStartupLocation="CenterScreen" Background="{StaticResource Surface}"
+        FontFamily="Segoe UI" FontSize="15">
+
+    <Window.Resources>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Muted}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Margin" Value="0,12,0,4" />
+        </Style>
+        <Style x:Key="FieldBox" TargetType="Control">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="KeyButton" TargetType="Button" BasedOn="{StaticResource PosButton}">
+            <Setter Property="Height" Value="54" />
+            <Setter Property="Margin" Value="0,0,8,8" />
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Focusable" Value="False" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="5*" />
+            <ColumnDefinition Width="6*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Brand panel -->
+        <Border Background="{StaticResource BrandDark}">
+            <Grid Margin="56">
+                <StackPanel VerticalAlignment="Top">
+                    <TextBlock Text="WAVE POS" Foreground="White" FontSize="40" FontWeight="Bold" />
+                    <TextBlock Text="Point of sale" Foreground="#B9C6E4" FontSize="18" Margin="0,4,0,0" />
+                </StackPanel>
+                <StackPanel VerticalAlignment="Bottom">
+                    <TextBlock x:Name="ClockText" Foreground="White" FontSize="56" FontWeight="Light" />
+                    <TextBlock x:Name="DateText" Foreground="#B9C6E4" FontSize="18" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Form -->
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+            <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                    CornerRadius="12" Padding="36,32" Margin="40" MaxWidth="460" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock Text="{Binding Heading}" FontSize="28" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding SubHeading}" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,8" />
+
+                    <!-- Setup only: full name -->
+                    <StackPanel Visibility="{Binding IsSetupMode, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Full name" Style="{StaticResource FieldLabel}" />
+                        <TextBox x:Name="NameBox" Style="{StaticResource FieldBox}"
+                                 Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+
+                    <TextBlock Text="Username" Style="{StaticResource FieldLabel}" />
+                    <TextBox x:Name="UsernameBox" Style="{StaticResource FieldBox}"
+                             Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}" />
+
+                    <TextBlock Text="PIN or password" Style="{StaticResource FieldLabel}" />
+                    <PasswordBox x:Name="PasswordBox" Style="{StaticResource FieldBox}" PasswordChanged="OnPasswordChanged" />
+
+                    <!-- Setup only: confirm -->
+                    <StackPanel Visibility="{Binding IsSetupMode, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Confirm PIN or password" Style="{StaticResource FieldLabel}" />
+                        <PasswordBox x:Name="ConfirmBox" Style="{StaticResource FieldBox}" />
+                    </StackPanel>
+
+                    <!-- On-screen keypad for touch screens: types into the PIN box -->
+                    <UniformGrid Columns="3" Margin="0,16,-8,0">
+                        <Button Style="{StaticResource KeyButton}" Content="1" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="2" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="3" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="4" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="5" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="6" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="7" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="8" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="9" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="Clear" FontSize="15" Click="OnKeypadClear" />
+                        <Button Style="{StaticResource KeyButton}" Content="0" Click="OnKeypad" />
+                        <Button Style="{StaticResource KeyButton}" Content="⌫" Click="OnKeypadBackspace" />
+                    </UniformGrid>
+
+                    <Border Background="#FBE7E7" CornerRadius="6" Padding="12,8" Margin="0,8,0,0"
+                            Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource Danger}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                    </Border>
+
+                    <Button x:Name="SubmitButton" Style="{StaticResource PrimaryButton}" Height="56" Margin="0,16,0,0"
+                            Background="{StaticResource Brand}" BorderBrush="{StaticResource Brand}"
+                            Content="{Binding SubmitText}" IsDefault="True" Click="OnSubmit" />
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+    </Grid>
+</Window>

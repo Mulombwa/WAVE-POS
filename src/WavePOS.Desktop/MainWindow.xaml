@@ -19,7 +19,12 @@
         <Border DockPanel.Dock="Top" Background="{StaticResource BrandDark}" Padding="20,12">
             <DockPanel>
                 <TextBlock Text="WAVE POS" Foreground="White" FontSize="22" FontWeight="Bold" VerticalAlignment="Center" />
-                <TextBlock Text="Till 1 · Cashier" Foreground="#B9C6E4" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding CashierText}" Foreground="#B9C6E4" VerticalAlignment="Center" Margin="0,0,14,0" />
+                    <Button Content="Log out" Style="{StaticResource PosButton}" Padding="14,4" FontSize="13"
+                            Background="Transparent" Foreground="White" BorderBrush="#5A6E9A"
+                            Command="{Binding LogoutCommand}" />
+                </StackPanel>
             </DockPanel>
         </Border>
 
