@@ -64,6 +64,56 @@ public class DraftInvoiceRepository(PosDatabase db)
         return number;
     }
 
+    /// <summary>Loads a saved draft invoice by its number (e.g. DRF-00001). Null if not found.</summary>
+    public SalesDocument? Get(string number)
+    {
+        using var conn = db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT d.id, d.created_at, d.valid_until, d.customer_name, d.total_ngwee, d.vat_ngwee,
+                   COALESCE(u.display_name, '')
+            FROM draft_invoices d LEFT JOIN users u ON u.id = d.cashier_id
+            WHERE d.number = $n;
+            """;
+        cmd.Parameters.AddWithValue("$n", number.Trim().ToUpperInvariant());
+
+        using var r = cmd.ExecuteReader();
+        if (!r.Read()) return null;
+        var id = r.GetInt64(0);
+        var created = DateTime.Parse(r.GetString(1), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+        DateTime? validUntil = r.IsDBNull(2) ? null : DateTime.Parse(r.GetString(2), CultureInfo.InvariantCulture);
+        var customer = r.IsDBNull(3) ? null : r.GetString(3);
+        var total = Money.FromNgwee(r.GetInt64(4));
+        var vat = Money.FromNgwee(r.GetInt64(5));
+        var cashier = r.GetString(6);
+        r.Close();
+
+        using var lines = conn.CreateCommand();
+        lines.CommandText = """
+            SELECT product_id, description, quantity, unit_price_ngwee, vat_rate
+            FROM draft_invoice_lines WHERE draft_id = $id ORDER BY id;
+            """;
+        lines.Parameters.AddWithValue("$id", id);
+        var list = new List<DocumentLine>();
+        using (var lr = lines.ExecuteReader())
+            while (lr.Read())
+                list.Add(new DocumentLine(lr.IsDBNull(0) ? null : lr.GetInt64(0), lr.GetString(1), lr.GetInt32(2),
+                    Money.FromNgwee(lr.GetInt64(3)), (decimal)lr.GetDouble(4)));
+
+        return new SalesDocument
+        {
+            Kind = DocumentKind.DraftInvoice,
+            Number = number.Trim().ToUpperInvariant(),
+            Date = created,
+            CashierName = cashier,
+            CustomerName = customer,
+            Lines = list,
+            Total = total,
+            VatAmount = vat,
+            ValidUntil = validUntil,
+        };
+    }
+
     public int Count()
     {
         using var conn = db.Open();

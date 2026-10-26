@@ -1,0 +1,83 @@
+@page "/documents/receipt/{SaleId:long}"
+@page "/documents/draft/{Number}"
+@attribute [Authorize]
+@layout BareLayout
+@inject SaleRepository Sales
+@inject DraftInvoiceRepository Drafts
+@inject SettingsRepository Settings
+
+@* Static page with print styles: open it to view, or the till prints it through a hidden frame. *@
+<PageTitle>@(_doc is null ? "Not found" : $"{_doc.Title} {_doc.Number}") · WAVE POS</PageTitle>
+<HeadContent>
+    <style>
+        @(_paper == PaperSize.A4
+            ? "@page { size: A4; margin: 0; }"
+            : "@page { size: 80mm auto; margin: 0; }")
+    </style>
+</HeadContent>
+
+<div class="doc-screen @(Embed ? "embedded" : "")">
+    @if (!Embed)
+    {
+        <div class="doc-toolbar no-print">
+            <div>
+                <strong>@(_doc is null ? "Document not found" : $"{_doc.Title}  {_doc.Number}")</strong>
+                <span class="muted">To save as PDF, click Print and choose “Save as PDF”.</span>
+            </div>
+            @if (_doc is not null)
+            {
+                <div class="doc-toolbar-actions">
+                    <a class="btn small @(_paper == PaperSize.Receipt80mm ? "selected" : "")" href="@PaperLink(PaperSize.Receipt80mm)">80mm receipt</a>
+                    <a class="btn small @(_paper == PaperSize.A4 ? "selected" : "")" href="@PaperLink(PaperSize.A4)">A4 page</a>
+                    <button type="button" class="btn primary" onclick="window.print()">Print…</button>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_doc is null)
+    {
+        <p class="doc-missing">That receipt or invoice doesn't exist.</p>
+    }
+    else
+    {
+        <DocumentView Document="_doc" Business="_business" Paper="_paper" />
+    }
+
+    @if (!Embed)
+    {
+        <div class="doc-footer no-print"><BuiltByWave /></div>
+    }
+</div>
+
+@code {
+    [Parameter] public long? SaleId { get; set; }
+    [Parameter] public string? Number { get; set; }
+    [SupplyParameterFromQuery(Name = "paper")] public string? PaperQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "embed")] public int? EmbedQuery { get; set; }
+
+    private SalesDocument? _doc;
+    private BusinessProfile _business = new();
+    private PaperSize _paper;
+
+    private bool Embed => EmbedQuery == 1;
+
+    protected override void OnParametersSet()
+    {
+        _business = Settings.GetBusinessProfile();
+        var print = Settings.GetPrintSettings();
+
+        if (SaleId is { } id)
+        {
+            _doc = Sales.GetReceipt(id);
+            _paper = Branding.ParsePaper(PaperQuery, print.ReceiptPaper);
+        }
+        else
+        {
+            _doc = Number is null ? null : Drafts.Get(Number);
+            _paper = Branding.ParsePaper(PaperQuery, print.InvoicePaper);
+        }
+    }
+
+    private string PaperLink(PaperSize paper) => $"?paper={Branding.PaperParam(paper)}";
+}

@@ -1,5 +1,6 @@
 using System.Globalization;
 using WavePOS.Core;
+using WavePOS.Core.Documents;
 using WavePOS.Core.Models;
 
 namespace WavePOS.Data;
@@ -50,6 +51,57 @@ public class SaleRepository(PosDatabase db)
 
         tx.Commit();
         return sale.Id;
+    }
+
+    /// <summary>Loads a saved sale as a receipt (for reprinting). Null if not found.</summary>
+    public SalesDocument? GetReceipt(long saleId)
+    {
+        using var conn = db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT s.timestamp, s.total_ngwee, s.vat_ngwee, s.payment_method, s.tendered_ngwee, s.change_ngwee,
+                   COALESCE(u.display_name, '')
+            FROM sales s LEFT JOIN users u ON u.id = s.cashier_id
+            WHERE s.id = $id;
+            """;
+        cmd.Parameters.AddWithValue("$id", saleId);
+
+        using var r = cmd.ExecuteReader();
+        if (!r.Read()) return null;
+        var timestamp = DateTime.Parse(r.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+        var total = Money.FromNgwee(r.GetInt64(1));
+        var vat = Money.FromNgwee(r.GetInt64(2));
+        var method = Enum.Parse<PaymentMethod>(r.GetString(3));
+        var tendered = Money.FromNgwee(r.GetInt64(4));
+        var change = Money.FromNgwee(r.GetInt64(5));
+        var cashier = r.GetString(6);
+        r.Close();
+
+        using var lines = conn.CreateCommand();
+        lines.CommandText = """
+            SELECT product_id, product_name, quantity, unit_price_ngwee, vat_rate
+            FROM sale_lines WHERE sale_id = $id ORDER BY id;
+            """;
+        lines.Parameters.AddWithValue("$id", saleId);
+        var list = new List<DocumentLine>();
+        using (var lr = lines.ExecuteReader())
+            while (lr.Read())
+                list.Add(new DocumentLine(lr.GetInt64(0), lr.GetString(1), lr.GetInt32(2),
+                    Money.FromNgwee(lr.GetInt64(3)), (decimal)lr.GetDouble(4)));
+
+        return new SalesDocument
+        {
+            Kind = DocumentKind.Receipt,
+            Number = saleId.ToString("D6"),
+            Date = timestamp,
+            CashierName = cashier,
+            Lines = list,
+            Total = total,
+            VatAmount = vat,
+            PaymentMethod = method,
+            AmountTendered = tendered,
+            Change = change,
+        };
     }
 
     /// <summary>Total takings for a given day (for the end-of-day screen later).</summary>

@@ -1,0 +1,46 @@
+﻿@inherits LayoutComponentBase
+@inject SettingsRepository Settings
+
+<div class="app">
+    <header class="topbar">
+        <a class="brand" href="/">
+            <img src="@Branding.LogoUrl(_profile)" alt="@_profile.Name logo" />
+            <span class="brand-divider"></span>
+            <span class="brand-name">@_profile.Name</span>
+        </a>
+        <AuthorizeView>
+            <Authorized>
+                <nav class="topnav">
+                    <NavLink href="/" Match="NavLinkMatch.All">Till</NavLink>
+                    <AuthorizeView Policy="@UserClaims.ManagerPolicy" Context="manager">
+                        <NavLink href="/settings">Settings</NavLink>
+                    </AuthorizeView>
+                </nav>
+                <span class="who">@context.User.Identity?.Name · @context.User.ToUser().Role</span>
+                <form method="post" action="/logout" class="logout">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn outline small">Log out</button>
+                </form>
+            </Authorized>
+        </AuthorizeView>
+    </header>
+
+    <main class="content">
+        @Body
+    </main>
+
+    <footer class="footer">
+        <BuiltByWave />
+    </footer>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Something went wrong. <a href="." class="reload">Reload</a>
+    <span class="dismiss">✕</span>
+</div>
+
+@code {
+    private BusinessProfile _profile = new();
+
+    protected override void OnParametersSet() => _profile = Settings.GetBusinessProfile();
+}
