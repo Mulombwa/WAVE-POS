@@ -1,10 +1,14 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Input;
+using System.Windows.Media;
 using WavePOS.Core;
+using WavePOS.Core.Documents;
 using WavePOS.Core.Models;
 using WavePOS.Core.Sales;
 using WavePOS.Data;
+using WavePOS.Desktop.Branding;
+using WavePOS.Desktop.Services;
 
 namespace WavePOS.Desktop.ViewModels;
 
@@ -16,6 +20,9 @@ public class SalesViewModel : ObservableObject
 {
     private readonly ProductRepository _products;
     private readonly SaleRepository _sales;
+    private readonly DraftInvoiceRepository _drafts;
+    private readonly SettingsRepository _settings;
+    private readonly PosUi _ui;
     private readonly Cart _cart = new();
 
     private string _searchText = "";
@@ -23,15 +30,28 @@ public class SalesViewModel : ObservableObject
     private string _statusMessage;
     private bool _statusIsError;
     private PaymentMethod _paymentMethod = PaymentMethod.Cash;
+    private SalesDocument? _lastReceipt;
+    private bool _autoPrintReceipt;
+    private string _businessName = "";
+    private ImageSource _logoImage = null!;
 
-    public SalesViewModel(ProductRepository products, SaleRepository sales, User cashier)
+    public SalesViewModel(ProductRepository products, SaleRepository sales, DraftInvoiceRepository drafts,
+        SettingsRepository settings, PosUi ui, User cashier)
     {
         _products = products;
         _sales = sales;
+        _drafts = drafts;
+        _settings = settings;
+        _ui = ui;
         Cashier = cashier;
         _statusMessage = $"Welcome, {cashier.DisplayName}. Scan a barcode or tap a product.";
+        LoadBranding();
+        _autoPrintReceipt = settings.GetPrintSettings().AutoPrintReceipt;
 
         LogoutCommand = new RelayCommand(Logout);
+        SettingsCommand = new RelayCommand(_ => OpenSettings(), _ => Cashier.IsManager);
+        DraftInvoiceCommand = new RelayCommand(_ => CreateDraftInvoice(), _ => !_cart.IsEmpty);
+        ReprintReceiptCommand = new RelayCommand(_ => { if (_lastReceipt is not null) _ui.Preview(_lastReceipt); }, _ => _lastReceipt is not null);
         AddProductCommand = new RelayCommand(p => { if (p is Product product) AddToCart(product); });
         IncreaseCommand = new RelayCommand(p => ChangeQuantity(p, +1));
         DecreaseCommand = new RelayCommand(p => ChangeQuantity(p, -1));
@@ -63,6 +83,74 @@ public class SalesViewModel : ObservableObject
             return;
         }
         LogoutRequested?.Invoke();
+    }
+
+    // ---------- Branding and settings ----------
+
+    public string BusinessName { get => _businessName; private set => SetProperty(ref _businessName, value); }
+
+    /// <summary>The business's logo (Wave logo until it uploads its own).</summary>
+    public ImageSource LogoImage { get => _logoImage; private set => SetProperty(ref _logoImage, value); }
+
+    public bool IsManager => Cashier.IsManager;
+    public ICommand SettingsCommand { get; }
+
+    private void LoadBranding()
+    {
+        var profile = _settings.GetBusinessProfile();
+        BusinessName = profile.Name;
+        LogoImage = Logo.For(profile);
+    }
+
+    private void OpenSettings()
+    {
+        if (!_ui.EditSettings()) return;
+        LoadBranding();
+        AutoPrintReceipt = _settings.GetPrintSettings().AutoPrintReceipt;
+        SetStatus("Settings saved.");
+    }
+
+    // ---------- Printing ----------
+
+    /// <summary>Print a receipt automatically after each sale. Saved as a setting.</summary>
+    public bool AutoPrintReceipt
+    {
+        get => _autoPrintReceipt;
+        set
+        {
+            if (!SetProperty(ref _autoPrintReceipt, value)) return;
+            var print = _settings.GetPrintSettings();
+            print.AutoPrintReceipt = value;
+            _settings.SavePrintSettings(print);
+        }
+    }
+
+    public ICommand DraftInvoiceCommand { get; }
+    public ICommand ReprintReceiptCommand { get; }
+
+    /// <summary>Saves the current cart as a numbered draft invoice (quotation) and opens it for printing. The cart is kept.</summary>
+    private void CreateDraftInvoice()
+    {
+        var customer = _ui.AskText("Draft invoice", "Customer name (optional). The cart stays as it is.", "Create draft");
+        if (customer is null) return; // cancelled
+
+        var draft = SalesDocument.DraftFromCart(_cart, Cashier.DisplayName, customer, DateTime.Now);
+        _drafts.Save(draft, Cashier.Id);
+        SetStatus($"Draft invoice {draft.Number} created for {Money.Format(draft.Total)}.");
+        _ui.Preview(draft);
+    }
+
+    private void PrintReceiptAfterSale(SalesDocument receipt)
+    {
+        try
+        {
+            if (!_ui.PrintReceipt(receipt))
+                SetStatus($"{StatusMessage} Receipt not printed (cancelled).");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Sale saved, but the receipt didn't print: {ex.Message}", isError: true);
+        }
     }
 
     public ObservableCollection<Product> Products { get; } = [];
@@ -184,6 +272,9 @@ public class SalesViewModel : ObservableObject
 
             var change = sale.PaymentMethod == PaymentMethod.Cash ? $" Change: {Money.Format(sale.Change)}." : "";
             SetStatus($"Sale #{sale.Id} complete — {Money.Format(sale.Total)} by {Describe(sale.PaymentMethod)}.{change}");
+
+            _lastReceipt = SalesDocument.FromSale(sale, Cashier.DisplayName);
+            if (AutoPrintReceipt) PrintReceiptAfterSale(_lastReceipt);
         }
         catch (InvalidOperationException ex)
         {

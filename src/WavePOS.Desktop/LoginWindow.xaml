@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:WavePOS.Desktop.ViewModels"
+        xmlns:branding="clr-namespace:WavePOS.Desktop.Branding"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:LoginViewModel}"
         Title="WAVE POS — Sign in" WindowState="Maximized" Width="1100" Height="720"
@@ -37,26 +38,30 @@
             <ColumnDefinition Width="6*" />
         </Grid.ColumnDefinitions>
 
-        <!-- Brand panel -->
-        <Border Background="{StaticResource BrandDark}">
+        <!-- Brand panel: the business's logo (Wave logo by default) -->
+        <Border Background="White" BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
             <Grid Margin="56">
-                <StackPanel VerticalAlignment="Top">
-                    <TextBlock Text="WAVE POS" Foreground="White" FontSize="40" FontWeight="Bold" />
-                    <TextBlock Text="Point of sale" Foreground="#B9C6E4" FontSize="18" Margin="0,4,0,0" />
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <Image Source="{Binding LogoImage}" MaxWidth="420" MaxHeight="260" Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+                    <TextBlock Text="Point of sale" Foreground="{StaticResource Muted}" FontSize="18"
+                               HorizontalAlignment="Center" Margin="0,24,0,0" />
                 </StackPanel>
                 <StackPanel VerticalAlignment="Bottom">
-                    <TextBlock x:Name="ClockText" Foreground="White" FontSize="56" FontWeight="Light" />
-                    <TextBlock x:Name="DateText" Foreground="#B9C6E4" FontSize="18" />
+                    <TextBlock x:Name="ClockText" Foreground="{StaticResource Ink}" FontSize="56" FontWeight="Light" />
+                    <TextBlock x:Name="DateText" Foreground="{StaticResource Muted}" FontSize="18" />
                 </StackPanel>
             </Grid>
         </Border>
+
+        <branding:BuiltByWave Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,20" />
 
         <!-- Form -->
         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
             <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Border}" BorderThickness="1"
                     CornerRadius="12" Padding="36,32" Margin="40" MaxWidth="460" VerticalAlignment="Center">
                 <StackPanel>
-                    <TextBlock Text="{Binding Heading}" FontSize="28" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Heading}" FontSize="28" FontWeight="SemiBold" Foreground="{StaticResource Ink}" />
                     <TextBlock Text="{Binding SubHeading}" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,8" />
 
                     <!-- Setup only: full name -->

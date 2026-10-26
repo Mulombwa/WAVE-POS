@@ -1,0 +1,12 @@
+<UserControl x:Class="WavePOS.Desktop.Branding.BuiltByWave"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ToolTip="WAVE POS — built by Wave Cyber Security">
+    <!-- "Built by Wave" mark shown at the bottom of every screen. Always the Wave brand, even when a business uses its own logo. -->
+    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock Text="Built by" Foreground="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" />
+        <Image Source="{StaticResource WaveSymbol}" Height="18" Margin="6,0,4,0" VerticalAlignment="Center"
+               RenderOptions.BitmapScalingMode="HighQuality" />
+        <TextBlock Text="Wave" Foreground="{StaticResource BrandLight}" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+    </StackPanel>
+</UserControl>
