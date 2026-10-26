@@ -6,7 +6,6 @@ namespace WavePOS.Web.Services;
 /// <summary>Turns a WAVE POS user into sign-in claims and back.</summary>
 public static class UserClaims
 {
-    public const string ManagerPolicy = "Manager";
     private const string UsernameClaim = "wavepos:username";
 
     public static ClaimsPrincipal ToPrincipal(User user, string scheme) => new(new ClaimsIdentity(
@@ -31,6 +30,13 @@ public static class UserClaims
         return current is { IsActive: true }
             && string.Equals(current.Username, claimed.Username, StringComparison.OrdinalIgnoreCase)
             && current.Role == claimed.Role;
+    }
+
+    /// <summary>The signed-in person, for the audit trail.</summary>
+    public static WavePOS.Core.Audit.Actor ToActor(this ClaimsPrincipal principal)
+    {
+        var user = principal.ToUser();
+        return new WavePOS.Core.Audit.Actor(user.Id, user.DisplayName);
     }
 
     public static User ToUser(this ClaimsPrincipal principal) => new()

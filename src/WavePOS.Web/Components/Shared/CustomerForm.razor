@@ -1,0 +1,31 @@
+@* Customer details form, with the Data Protection Act notice and marketing consent. *@
+<fieldset disabled="@Disabled" class="plain">
+    <label class="field"><span>Full name</span><input @bind="Customer.Name" /></label>
+    <div class="two-col">
+        <label class="field"><span>Phone</span><input type="tel" @bind="Customer.Phone" /></label>
+        <label class="field"><span>Email</span><input type="email" @bind="Customer.Email" /></label>
+    </div>
+    <label class="field"><span>Address</span><input @bind="Customer.Address" /></label>
+    <label class="field"><span>Notes</span><textarea rows="2" @bind="Customer.Notes"></textarea></label>
+
+    <div class="privacy-note">
+        <strong>Privacy notice</strong>
+        <p>
+            We keep these details to manage purchases, receipts and returns, as allowed by Zambia's
+            Data Protection Act 2021. Customers can ask to see their data or have it deleted at any time.
+        </p>
+        <label class="check">
+            <input type="checkbox" @bind="Customer.MarketingConsent" />
+            The customer agrees to receive offers and news by phone, SMS or email
+        </label>
+        @if (Customer.MarketingConsent && Customer.ConsentDate is { } date)
+        {
+            <span class="muted small">Consent recorded @date.ToString("dd MMM yyyy")</span>
+        }
+    </div>
+</fieldset>
+
+@code {
+    [Parameter, EditorRequired] public Customer Customer { get; set; } = default!;
+    [Parameter] public bool Disabled { get; set; }
+}

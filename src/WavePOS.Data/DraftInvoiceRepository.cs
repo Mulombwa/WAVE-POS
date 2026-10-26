@@ -1,5 +1,6 @@
 using System.Globalization;
 using WavePOS.Core;
+using WavePOS.Core.Audit;
 using WavePOS.Core.Documents;
 
 namespace WavePOS.Data;
@@ -58,6 +59,9 @@ public class DraftInvoiceRepository(PosDatabase db)
             cmd.Parameters.AddWithValue("$vat", (double)line.VatRate);
             cmd.ExecuteNonQuery();
         }
+
+        AuditRepository.Write(conn, tx, new Actor(cashierId, draft.CashierName), AuditActions.DraftInvoiceCreated,
+            "draft_invoice", number, $"Draft invoice {number} for {Money.Format(draft.Total)}");
 
         tx.Commit();
         draft.Number = number;

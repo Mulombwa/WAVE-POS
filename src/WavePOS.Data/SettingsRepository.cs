@@ -1,3 +1,4 @@
+using WavePOS.Core.Audit;
 using WavePOS.Core.Models;
 
 namespace WavePOS.Data;
@@ -44,6 +45,21 @@ public class SettingsRepository(PosDatabase db)
         var logo = Get("business.logo_path");
         p.LogoPath = string.IsNullOrWhiteSpace(logo) ? null : logo;
         return p;
+    }
+
+    /// <summary>Saves the business details and records who changed them.</summary>
+    public void SaveBusinessProfile(BusinessProfile p, Actor actor)
+    {
+        SaveBusinessProfile(p);
+        new AuditRepository(db).Write(actor, AuditActions.SettingsChanged, "settings", "business",
+            $"Business details saved (name \"{p.Name.Trim()}\", {(p.HasCustomLogo ? "custom logo" : "Wave logo")})");
+    }
+
+    public void SavePrintSettings(PrintSettings s, Actor actor)
+    {
+        SavePrintSettings(s);
+        new AuditRepository(db).Write(actor, AuditActions.SettingsChanged, "settings", "printing",
+            $"Printing: receipts {s.ReceiptPaper}, invoices {s.InvoicePaper}, auto-print {(s.AutoPrintReceipt ? "on" : "off")}");
     }
 
     public void SaveBusinessProfile(BusinessProfile p) => SetMany(

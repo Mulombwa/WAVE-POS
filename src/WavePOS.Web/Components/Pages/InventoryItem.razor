@@ -1,0 +1,217 @@
+@page "/inventory/{Id:long}"
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ViewInventory))]
+@rendermode InteractiveServer
+@using WavePOS.Core.Inventory
+@using WavePOS.Core.Security
+@inject ProductRepository Products
+@inject InventoryRepository Inventory
+
+<PageTitle>@(_product?.Name ?? "Product") · WAVE POS</PageTitle>
+
+<div class="page">
+    <p><a href="/inventory">← Inventory</a></p>
+
+    @if (_product is null)
+    {
+        <p class="muted">Product not found.</p>
+    }
+    else
+    {
+        <div class="page-head">
+            <div>
+                <h1>@_product.Name</h1>
+                <span class="muted mono">@_product.Sku</span>
+                @if (!_product.IsActive) { <span class="badge">Inactive</span> }
+            </div>
+            <div class="big-stock @(_product.StockQuantity <= 0 ? "danger" : _product.IsLowStock ? "warn" : "")">
+                <span>In stock</span><strong>@_product.StockQuantity</strong>
+            </div>
+        </div>
+
+        @if (Created is > 0) { <div class="alert success">Created @Created @(Created == 1 ? "product" : "variants").</div> }
+        @if (_message is not null) { <div class="alert @(_messageIsError ? "error" : "success")" role="status">@_message</div> }
+
+        <div class="cols">
+            <!-- Details -->
+            <section class="card">
+                <h2>Details</h2>
+                <fieldset disabled="@(!_canEdit)">
+                    <label class="field"><span>Name</span><input @bind="_edit.Name" /></label>
+                    <div class="two-col">
+                        <label class="field"><span>Category</span><input @bind="_edit.Category" /></label>
+                        <label class="field"><span>Barcode</span><input @bind="_edit.Barcode" /></label>
+                        <label class="field"><span>Price (incl. VAT), K</span><input type="number" step="0.01" min="0" @bind="_edit.Price" /></label>
+                        <label class="field"><span>Cost, K</span><input type="number" step="0.01" min="0" @bind="_edit.Cost" /></label>
+                        <label class="field">
+                            <span>VAT</span>
+                            <select @bind="_edit.VatRate">
+                                <option value="0.16">16% standard</option>
+                                <option value="0">Exempt / zero-rated</option>
+                            </select>
+                        </label>
+                        <label class="field"><span>Reorder level</span><input type="number" min="0" @bind="_edit.ReorderLevel" /></label>
+                    </div>
+                    <label class="check"><input type="checkbox" @bind="_edit.IsActive" /> Active (shown on the till)</label>
+                </fieldset>
+                @if (_canEdit)
+                {
+                    <div class="actions-row"><button type="button" class="btn primary" @onclick="SaveDetails">Save details</button></div>
+                }
+            </section>
+
+            <!-- Stock actions -->
+            <section class="card">
+                <h2>Stock</h2>
+                @if (!_canAdjust)
+                {
+                    <p class="muted">Ask a supervisor or manager to receive or adjust stock.</p>
+                }
+                else
+                {
+                    <div class="tabs" role="tablist">
+                        @foreach (var tab in new[] { "Receive", "Adjust", "Count" })
+                        {
+                            <button type="button" role="tab" aria-selected="@(_tab == tab)" class="tab @(_tab == tab ? "active" : "")" @onclick="() => _tab = tab">@tab</button>
+                        }
+                    </div>
+                    @switch (_tab)
+                    {
+                        case "Receive":
+                            <p class="muted">Goods delivered from a supplier.</p>
+                            <div class="two-col">
+                                <label class="field"><span>Quantity received</span><input type="number" min="1" @bind="_qty" /></label>
+                                <label class="field"><span>Unit cost, K (optional)</span><input type="number" min="0" step="0.01" @bind="_unitCost" /></label>
+                            </div>
+                            <label class="field"><span>Supplier invoice / reference</span><input @bind="_reference" /></label>
+                            <label class="field"><span>Note</span><input @bind="_note" /></label>
+                            <button type="button" class="btn primary" @onclick="Receive">Receive stock</button>
+                            break;
+                        case "Adjust":
+                            <p class="muted">Write off or correct stock. Use a minus number to remove.</p>
+                            <div class="two-col">
+                                <label class="field"><span>Change (+/−)</span><input type="number" @bind="_qty" /></label>
+                                <label class="field">
+                                    <span>Reason</span>
+                                    <select @bind="_reason">
+                                        @foreach (var r in AdjustReasons) { <option value="@r">@r</option> }
+                                    </select>
+                                </label>
+                            </div>
+                            <label class="field"><span>Note</span><input @bind="_note" placeholder="What happened?" /></label>
+                            <button type="button" class="btn primary" @onclick="Adjust">Adjust stock</button>
+                            break;
+                        default:
+                            <p class="muted">Stock take: enter what's actually on the shelf. The difference is recorded.</p>
+                            <label class="field"><span>Counted quantity</span><input type="number" min="0" @bind="_qty" /></label>
+                            <label class="field"><span>Note</span><input @bind="_note" /></label>
+                            <button type="button" class="btn primary" @onclick="Count">Save count</button>
+                            break;
+                    }
+                }
+
+                @if (_family.Count > 1)
+                {
+                    <h2 class="sub">Other variants</h2>
+                    <ul class="variant-list">
+                        @foreach (var v in _family)
+                        {
+                            <li class="@(v.Id == Id ? "current" : "")">
+                                <a href="/inventory/@v.Id">@(string.Join(" / ", new[] { v.Option1, v.Option2 }.Where(o => o is not null)))</a>
+                                <span class="muted">@v.StockQuantity in stock</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+        </div>
+
+        <section class="card">
+            <h2>Stock history</h2>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>When</th><th>Reason</th><th class="num">Change</th><th class="num">Balance</th><th>Reference</th><th>Note</th><th>By</th></tr></thead>
+                    <tbody>
+                        @foreach (var m in _history)
+                        {
+                            <tr>
+                                <td>@m.Timestamp.ToString("dd MMM yyyy HH:mm")</td>
+                                <td>@m.Reason</td>
+                                <td class="num @(m.Change < 0 ? "neg" : "pos")">@m.Change.ToString("+0;-0;0")</td>
+                                <td class="num">@m.BalanceAfter</td>
+                                <td>@m.Reference</td>
+                                <td>@m.Note</td>
+                                <td>@m.UserName</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public long Id { get; set; }
+    [SupplyParameterFromQuery(Name = "created")] public int? Created { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private static readonly StockReason[] AdjustReasons =
+        [StockReason.Damaged, StockReason.Expired, StockReason.Theft, StockReason.Adjustment];
+
+    private Product? _product;
+    private Product _edit = new();
+    private List<Product> _family = [];
+    private List<StockMovement> _history = [];
+    private bool _canEdit, _canAdjust;
+    private string _tab = "Receive";
+    private int _qty;
+    private decimal? _unitCost;
+    private string _reference = "", _note = "";
+    private StockReason _reason = StockReason.Damaged;
+    private string? _message;
+    private bool _messageIsError;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var role = (await AuthState).User.ToUser().Role;
+        _canEdit = role.Can(Permission.ManageInventory);
+        _canAdjust = role.Can(Permission.AdjustStock);
+        Load();
+    }
+
+    private void Load()
+    {
+        _product = Products.GetById(Id);
+        if (_product is null) return;
+        _edit = new Product
+        {
+            Id = _product.Id, Name = _product.Name, Category = _product.Category, Barcode = _product.Barcode,
+            Price = _product.Price, Cost = _product.Cost, VatRate = _product.VatRate,
+            ReorderLevel = _product.ReorderLevel, IsActive = _product.IsActive,
+        };
+        _family = _product.FamilyId is { } f ? Products.GetFamily(f) : [];
+        _history = Inventory.History(Id);
+    }
+
+    private async Task Run(Func<WavePOS.Core.Audit.Actor, string> action)
+    {
+        try
+        {
+            var actor = (await AuthState).User.ToActor();
+            _message = action(actor);
+            _messageIsError = false;
+            _qty = 0; _unitCost = null; _reference = ""; _note = "";
+            Load();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _message = ex.Message;
+            _messageIsError = true;
+        }
+    }
+
+    private Task SaveDetails() => Run(a => { Products.Update(_edit, a); return "Details saved."; });
+    private Task Receive() => Run(a => $"Received {_qty}. Now {Inventory.Receive(Id, _qty, _unitCost, _note, a, string.IsNullOrWhiteSpace(_reference) ? null : _reference.Trim())} in stock.");
+    private Task Adjust() => Run(a => $"Adjusted by {_qty:+0;-0}. Now {Inventory.Adjust(Id, _qty, _reason, _note, a)} in stock.");
+    private Task Count() => Run(a => $"Count saved. Now {Inventory.Count(Id, _qty, _note, a)} in stock.");
+}

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using WavePOS.Core.Security;
 using WavePOS.Data;
 using WavePOS.Web.Components;
 using WavePOS.Web.Services;
@@ -35,8 +36,13 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
             }
         };
     });
+// One policy per permission (e.g. "ProcessReturns"), allowing the roles defined in Core's Permissions.
 builder.Services.AddAuthorization(options =>
-    options.AddPolicy(UserClaims.ManagerPolicy, policy => policy.RequireRole(nameof(WavePOS.Core.Models.UserRole.Manager))));
+{
+    foreach (var permission in Enum.GetValues<Permission>())
+        options.AddPolicy(permission.ToString(), policy =>
+            policy.RequireRole(Permissions.RolesFor(permission).Select(r => r.ToString())));
+});
 builder.Services.AddCascadingAuthenticationState();
 
 // Database: same SQLite schema as the desktop app.
@@ -53,6 +59,10 @@ builder.Services.AddSingleton<SaleRepository>();
 builder.Services.AddSingleton<UserRepository>();
 builder.Services.AddSingleton<SettingsRepository>();
 builder.Services.AddSingleton<DraftInvoiceRepository>();
+builder.Services.AddSingleton<AuditRepository>();
+builder.Services.AddSingleton<InventoryRepository>();
+builder.Services.AddSingleton<CustomerRepository>();
+builder.Services.AddSingleton<ReturnRepository>();
 
 var app = builder.Build();
 
@@ -79,8 +89,13 @@ app.MapGet("/branding/logo", (SettingsRepository settings) =>
     return Results.Redirect("/img/wave-logo.svg");
 });
 
-app.MapPost("/logout", async (HttpContext context) =>
+app.MapPost("/logout", async (HttpContext context, AuditRepository audit) =>
 {
+    if (context.User.Identity?.IsAuthenticated == true)
+    {
+        var user = context.User.ToUser();
+        audit.Write(context.User.ToActor(), WavePOS.Core.Audit.AuditActions.Logout, "user", user.Id.ToString(), "Signed out");
+    }
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.Redirect("/login");
 }).WithMetadata(new RequireAntiforgeryTokenAttribute(true));
