@@ -1,0 +1,148 @@
+<Window x:Class="WavePOS.Desktop.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:WavePOS.Desktop.ViewModels"
+        xmlns:branding="clr-namespace:WavePOS.Desktop.Branding"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:SettingsViewModel}"
+        Title="WAVE POS — Settings" Width="820" Height="760" MinWidth="700" MinHeight="560"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource Surface}"
+        FontFamily="Segoe UI" FontSize="14" Foreground="{StaticResource Ink}">
+
+    <Window.Resources>
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Muted}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,10,0,4" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Padding" Value="8,6" />
+        </Style>
+        <Style x:Key="Section" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Card}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="20,16" />
+            <Setter Property="Margin" Value="0,0,0,14" />
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- Footer: buttons -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource Card}" BorderBrush="{StaticResource Border}"
+                BorderThickness="0,1,0,0" Padding="20,12">
+            <DockPanel>
+                <branding:BuiltByWave DockPanel.Dock="Left" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Cancel" Style="{StaticResource PosButton}" Width="110" IsCancel="True" Margin="0,0,10,0" />
+                    <Button x:Name="SaveButton" Content="Save" Style="{StaticResource PrimaryButton}" FontSize="15" Width="130"
+                            Background="{StaticResource Brand}" BorderBrush="{StaticResource Brand}" Click="OnSave" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="20">
+                <Border Background="#FBE7E7" CornerRadius="6" Padding="12,8" Margin="0,0,0,14"
+                        Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource Danger}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                </Border>
+
+                <!-- Logo -->
+                <Border Style="{StaticResource Section}">
+                    <StackPanel>
+                        <TextBlock Text="Logo" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="Shown on the sign-in screen, the till and printed receipts and invoices. PNG or JPG, ideally on a white or transparent background."
+                                   Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,4,0,12" />
+                        <DockPanel>
+                            <Border DockPanel.Dock="Left" Width="260" Height="130" Background="White" BorderBrush="{StaticResource Border}"
+                                    BorderThickness="1" CornerRadius="8" Padding="12">
+                                <Image Source="{Binding LogoPreview}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+                            </Border>
+                            <StackPanel Margin="18,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding LogoDescription}" FontWeight="SemiBold" Margin="0,0,0,10" />
+                                <Button Content="Upload your logo…" Style="{StaticResource OutlineButton}" HorizontalAlignment="Left"
+                                        Click="OnChooseLogo" Margin="0,0,0,8" />
+                                <Button Content="Use the Wave logo" Style="{StaticResource PosButton}" HorizontalAlignment="Left"
+                                        Click="OnUseWaveLogo" FontSize="13"
+                                        Visibility="{Binding HasCustomLogo, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Business details -->
+                <Border Style="{StaticResource Section}">
+                    <StackPanel>
+                        <TextBlock Text="Business details" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="Printed at the top of receipts and invoices." Foreground="{StaticResource Muted}" Margin="0,4,0,0" />
+                        <TextBlock Text="Business name" Style="{StaticResource Label}" />
+                        <TextBox x:Name="NameBox" Text="{Binding Name}" />
+                        <TextBlock Text="Address" Style="{StaticResource Label}" />
+                        <TextBox Text="{Binding Address}" AcceptsReturn="True" Height="54" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Phone" Style="{StaticResource Label}" />
+                                <TextBox Text="{Binding Phone}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Email" Style="{StaticResource Label}" />
+                                <TextBox Text="{Binding Email}" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="TPIN (ZRA taxpayer number)" Style="{StaticResource Label}" />
+                        <TextBox Text="{Binding Tpin}" />
+                        <TextBlock Text="Message at the bottom of receipts" Style="{StaticResource Label}" />
+                        <TextBox Text="{Binding ReceiptFooter}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Printing -->
+                <Border Style="{StaticResource Section}">
+                    <StackPanel>
+                        <TextBlock Text="Printing" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="Printer" Style="{StaticResource Label}" />
+                        <ComboBox ItemsSource="{Binding Printers}" SelectedItem="{Binding SelectedPrinter}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Receipt paper" Style="{StaticResource Label}" />
+                                <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.PaperOptions}" DisplayMemberPath="Label"
+                                          SelectedItem="{Binding ReceiptPaper}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Invoice paper" Style="{StaticResource Label}" />
+                                <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.PaperOptions}" DisplayMemberPath="Label"
+                                          SelectedItem="{Binding InvoicePaper}" />
+                            </StackPanel>
+                        </Grid>
+                        <CheckBox Content="Print a receipt automatically after every sale" IsChecked="{Binding AutoPrintReceipt}"
+                                  Margin="0,14,0,0" />
+                        <TextBlock Text="Tip: choose “Microsoft Print to PDF” to save receipts and invoices as PDF files."
+                                   Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

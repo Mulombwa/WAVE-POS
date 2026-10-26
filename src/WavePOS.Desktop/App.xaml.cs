@@ -1,6 +1,8 @@
 ﻿using System.Windows;
 using WavePOS.Core.Models;
 using WavePOS.Data;
+using WavePOS.Desktop.Printing;
+using WavePOS.Desktop.Services;
 using WavePOS.Desktop.ViewModels;
 
 namespace WavePOS.Desktop;
@@ -37,7 +39,7 @@ public partial class App : Application
 
     private void ShowLogin()
     {
-        var vm = new LoginViewModel(new UserRepository(_db));
+        var vm = new LoginViewModel(new UserRepository(_db), new SettingsRepository(_db).GetBusinessProfile());
         var login = new LoginWindow(vm);
         var loggedIn = false;
 
@@ -55,7 +57,10 @@ public partial class App : Application
 
     private void ShowTill(User user)
     {
-        var vm = new SalesViewModel(new ProductRepository(_db), new SaleRepository(_db), user);
+        var settings = new SettingsRepository(_db);
+        var ui = new PosUi(_db, settings, new PrintService());
+        var vm = new SalesViewModel(new ProductRepository(_db), new SaleRepository(_db), new DraftInvoiceRepository(_db),
+            settings, ui, user);
         var till = new MainWindow { DataContext = vm };
         var loggingOut = false;
 

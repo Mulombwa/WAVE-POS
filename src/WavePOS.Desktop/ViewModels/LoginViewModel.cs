@@ -1,3 +1,4 @@
+using System.Windows.Media;
 using WavePOS.Core.Models;
 using WavePOS.Core.Security;
 using WavePOS.Data;
@@ -17,11 +18,17 @@ public class LoginViewModel : ObservableObject
     private bool _isBusy;
     private bool _isSetupMode;
 
-    public LoginViewModel(UserRepository users)
+    public LoginViewModel(UserRepository users, BusinessProfile business)
     {
         _users = users;
         _isSetupMode = !users.AnyUsers();
+        BusinessName = business.Name;
+        LogoImage = Branding.Logo.For(business);
     }
+
+    /// <summary>The business's logo (Wave logo until the business uploads its own).</summary>
+    public ImageSource LogoImage { get; }
+    public string BusinessName { get; }
 
     /// <summary>Raised when someone has logged in successfully.</summary>
     public event Action<User>? LoggedIn;

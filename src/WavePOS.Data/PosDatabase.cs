@@ -10,12 +10,16 @@ public class PosDatabase
 {
     public PosDatabase(string filePath)
     {
-        var dir = Path.GetDirectoryName(filePath);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        var dir = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
+        Directory.CreateDirectory(dir);
+        DataDirectory = dir;
         ConnectionString = new SqliteConnectionStringBuilder { DataSource = filePath }.ToString();
     }
 
     public string ConnectionString { get; }
+
+    /// <summary>Folder holding the database; also used for the business's logo file.</summary>
+    public string DataDirectory { get; }
 
     /// <summary>Default location: %LOCALAPPDATA%\WavePOS\wavepos.db</summary>
     public static string DefaultPath => Path.Combine(
@@ -70,6 +74,32 @@ public class PosDatabase
                 locked_until     TEXT,
                 last_login       TEXT,
                 created_at       TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key    TEXT PRIMARY KEY,
+                value  TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS draft_invoices (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                number         TEXT    UNIQUE,
+                created_at     TEXT    NOT NULL,
+                valid_until    TEXT,
+                cashier_id     INTEGER REFERENCES users(id),
+                customer_name  TEXT,
+                total_ngwee    INTEGER NOT NULL,
+                vat_ngwee      INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS draft_invoice_lines (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                draft_id          INTEGER NOT NULL REFERENCES draft_invoices(id),
+                product_id        INTEGER REFERENCES products(id),
+                description       TEXT    NOT NULL,
+                unit_price_ngwee  INTEGER NOT NULL,
+                quantity          INTEGER NOT NULL,
+                vat_rate          REAL    NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS sale_lines (

@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:WavePOS.Desktop.ViewModels"
+        xmlns:branding="clr-namespace:WavePOS.Desktop.Branding"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:SalesViewModel}"
         Title="WAVE POS" Height="800" Width="1280" MinHeight="600" MinWidth="1000"
@@ -15,15 +16,23 @@
     </Window.InputBindings>
 
     <DockPanel>
-        <!-- Header -->
-        <Border DockPanel.Dock="Top" Background="{StaticResource BrandDark}" Padding="20,12">
+        <!-- Header: the business's logo and name (Wave by default) -->
+        <Border DockPanel.Dock="Top" Background="White" BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="20,8">
             <DockPanel>
-                <TextBlock Text="WAVE POS" Foreground="White" FontSize="22" FontWeight="Bold" VerticalAlignment="Center" />
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding CashierText}" Foreground="#B9C6E4" VerticalAlignment="Center" Margin="0,0,14,0" />
-                    <Button Content="Log out" Style="{StaticResource PosButton}" Padding="14,4" FontSize="13"
-                            Background="Transparent" Foreground="White" BorderBrush="#5A6E9A"
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding CashierText}" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,14,0" />
+                    <Button Content="Settings" Style="{StaticResource PosButton}" Padding="14,4" FontSize="13" Margin="0,0,8,0"
+                            Command="{Binding SettingsCommand}"
+                            Visibility="{Binding IsManager, Converter={StaticResource BoolToVis}}" />
+                    <Button Content="Log out" Style="{StaticResource OutlineButton}" Padding="14,4" FontSize="13"
                             Command="{Binding LogoutCommand}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Source="{Binding LogoImage}" Height="48" MaxWidth="220" Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+                    <Rectangle Width="1" Fill="{StaticResource Border}" Margin="16,6" />
+                    <TextBlock Text="{Binding BusinessName}" Foreground="{StaticResource Ink}" FontSize="18" FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -41,9 +50,10 @@
                 </Style>
             </Border.Style>
             <DockPanel>
+                <branding:BuiltByWave DockPanel.Dock="Right" Margin="24,0,0,0" />
                 <TextBlock Text="Enter = add scanned code   ·   F12 = complete sale" Foreground="{StaticResource Muted}"
-                           DockPanel.Dock="Right" />
-                <TextBlock Text="{Binding StatusMessage}" FontWeight="SemiBold" />
+                           DockPanel.Dock="Right" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding StatusMessage}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             </DockPanel>
         </Border>
 
@@ -165,6 +175,18 @@
 
                         <Button Style="{StaticResource PrimaryButton}" Content="Complete sale  (F12)" Height="60"
                                 Command="{Binding CompleteSaleCommand}" />
+
+                        <!-- Print options -->
+                        <UniformGrid Columns="2" Margin="0,10,0,0">
+                            <Button Style="{StaticResource OutlineButton}" Content="Draft invoice" Margin="0,0,5,0" FontSize="14"
+                                    ToolTip="Save the cart as a numbered quotation and print it. The cart is kept."
+                                    Command="{Binding DraftInvoiceCommand}" />
+                            <Button Style="{StaticResource OutlineButton}" Content="Last receipt" Margin="5,0,0,0" FontSize="14"
+                                    ToolTip="Preview and print the receipt for the last completed sale"
+                                    Command="{Binding ReprintReceiptCommand}" />
+                        </UniformGrid>
+                        <CheckBox Content="Print receipt after each sale" IsChecked="{Binding AutoPrintReceipt}"
+                                  Margin="0,10,0,0" Foreground="{StaticResource Muted}" />
                     </StackPanel>
 
                     <!-- Cart lines -->
