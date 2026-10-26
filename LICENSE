@@ -1,0 +1,53 @@
+WAVE POS — Proprietary Software Licence
+
+Copyright (c) 2026 Wave Cyber Security Limited. All rights reserved.
+
+This software, including its source code, object code, documentation, designs,
+logos and other materials in this repository (together, the "Software"), is the
+proprietary and confidential property of Wave Cyber Security Limited ("Wave").
+
+1. No licence granted
+   No licence or other right in the Software is granted to anyone, whether
+   expressly, by implication or otherwise, except under a separate written
+   agreement signed by an authorised representative of Wave. Being able to see,
+   access or download the Software does not grant any right to use it.
+
+2. Restrictions
+   Without Wave's prior written permission, you may not:
+   (a) use, run or deploy the Software;
+   (b) copy, reproduce or store the Software, in whole or in part;
+   (c) modify, adapt, translate or create derivative works of the Software;
+   (d) distribute, publish, sell, rent, lease, sublicense or otherwise make the
+       Software available to anyone else;
+   (e) reverse engineer, decompile or disassemble the Software, except to the
+       extent that applicable law expressly permits this despite this restriction;
+   (f) remove or change any copyright, trademark or other notices in the Software.
+
+3. Trademarks
+   "Wave", "Wave Cyber Security", "WAVE POS", the Wave logo and the Wave shield
+   symbol are trademarks of Wave Cyber Security Limited. Nothing in this notice
+   grants any right to use them.
+
+4. Third-party components
+   The Software uses third-party components (for example .NET and SQLite) that
+   are licensed by their owners under their own terms. Those terms apply to
+   those components only; this notice does not change them.
+
+5. No warranty
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+   FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT, TO THE FULLEST EXTENT
+   PERMITTED BY LAW.
+
+6. Limitation of liability
+   TO THE FULLEST EXTENT PERMITTED BY LAW, WAVE SHALL NOT BE LIABLE FOR ANY
+   CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM OR IN CONNECTION WITH THE
+   SOFTWARE OR ITS USE, EXCEPT AS SET OUT IN A SEPARATE WRITTEN AGREEMENT
+   WITH WAVE.
+
+7. Enforcement
+   Any unauthorised use, copying or distribution of the Software may be an
+   infringement of Wave's rights and may result in legal action.
+
+For licensing enquiries, contact Wave Cyber Security Limited:
+https://wavecyber.co.zm
