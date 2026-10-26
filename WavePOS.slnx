@@ -6,5 +6,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WavePOS.Core.Tests/WavePOS.Core.Tests.csproj" />
+    <Project Path="tests/WavePOS.Data.Tests/WavePOS.Data.Tests.csproj" />
   </Folder>
 </Solution>

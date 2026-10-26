@@ -59,6 +59,19 @@ public class PosDatabase
                 change_ngwee     INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS users (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                username         TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+                display_name     TEXT    NOT NULL,
+                password_hash    TEXT    NOT NULL,
+                role             TEXT    NOT NULL DEFAULT 'Cashier',
+                is_active        INTEGER NOT NULL DEFAULT 1,
+                failed_attempts  INTEGER NOT NULL DEFAULT 0,
+                locked_until     TEXT,
+                last_login       TEXT,
+                created_at       TEXT    NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS sale_lines (
                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
                 sale_id           INTEGER NOT NULL REFERENCES sales(id),
@@ -71,7 +84,22 @@ public class PosDatabase
             """;
         cmd.ExecuteNonQuery();
 
+        // Upgrades for databases created by earlier versions.
+        AddColumnIfMissing(conn, "sales", "cashier_id", "INTEGER REFERENCES users(id)");
+
         if (seedSampleProducts) SeedSampleProducts(conn);
+    }
+
+    private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)
+    {
+        using var check = conn.CreateCommand();
+        check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $col;";
+        check.Parameters.AddWithValue("$col", column);
+        if ((long)check.ExecuteScalar()! > 0) return;
+
+        using var alter = conn.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition};";
+        alter.ExecuteNonQuery();
     }
 
     private static void SeedSampleProducts(SqliteConnection conn)

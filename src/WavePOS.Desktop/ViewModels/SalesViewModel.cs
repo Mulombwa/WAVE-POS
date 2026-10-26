@@ -20,15 +20,18 @@ public class SalesViewModel : ObservableObject
 
     private string _searchText = "";
     private string _tenderedText = "";
-    private string _statusMessage = "Ready. Scan a barcode or tap a product.";
+    private string _statusMessage;
     private bool _statusIsError;
     private PaymentMethod _paymentMethod = PaymentMethod.Cash;
 
-    public SalesViewModel(ProductRepository products, SaleRepository sales)
+    public SalesViewModel(ProductRepository products, SaleRepository sales, User cashier)
     {
         _products = products;
         _sales = sales;
+        Cashier = cashier;
+        _statusMessage = $"Welcome, {cashier.DisplayName}. Scan a barcode or tap a product.";
 
+        LogoutCommand = new RelayCommand(Logout);
         AddProductCommand = new RelayCommand(p => { if (p is Product product) AddToCart(product); });
         IncreaseCommand = new RelayCommand(p => ChangeQuantity(p, +1));
         DecreaseCommand = new RelayCommand(p => ChangeQuantity(p, -1));
@@ -42,6 +45,24 @@ public class SalesViewModel : ObservableObject
 
         LoadProducts();
         RefreshCart();
+    }
+
+    /// <summary>Raised when the cashier logs out; the app then returns to the login screen.</summary>
+    public event Action? LogoutRequested;
+
+    public User Cashier { get; }
+    public string CashierText => $"{Cashier.DisplayName} · {Cashier.Role}";
+
+    public ICommand LogoutCommand { get; }
+
+    private void Logout()
+    {
+        if (!_cart.IsEmpty)
+        {
+            SetStatus("Finish or clear the current sale before logging out.", isError: true);
+            return;
+        }
+        LogoutRequested?.Invoke();
     }
 
     public ObservableCollection<Product> Products { get; } = [];
@@ -152,6 +173,7 @@ public class SalesViewModel : ObservableObject
         try
         {
             var sale = _cart.Checkout(_paymentMethod, tendered);
+            sale.CashierId = Cashier.Id;
             _sales.Save(sale);
 
             _cart.Clear();

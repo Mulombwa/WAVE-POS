@@ -16,11 +16,12 @@ public class SaleRepository(PosDatabase db)
         {
             cmd.Transaction = tx;
             cmd.CommandText = """
-                INSERT INTO sales (timestamp, total_ngwee, vat_ngwee, payment_method, tendered_ngwee, change_ngwee)
-                VALUES ($ts, $total, $vat, $method, $tendered, $change);
+                INSERT INTO sales (timestamp, cashier_id, total_ngwee, vat_ngwee, payment_method, tendered_ngwee, change_ngwee)
+                VALUES ($ts, $cashier, $total, $vat, $method, $tendered, $change);
                 SELECT last_insert_rowid();
                 """;
             cmd.Parameters.AddWithValue("$ts", sale.Timestamp.ToString("o", CultureInfo.InvariantCulture));
+            cmd.Parameters.AddWithValue("$cashier", (object?)sale.CashierId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$total", Money.ToNgwee(sale.Total));
             cmd.Parameters.AddWithValue("$vat", Money.ToNgwee(sale.VatAmount));
             cmd.Parameters.AddWithValue("$method", sale.PaymentMethod.ToString());

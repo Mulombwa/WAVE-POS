@@ -22,6 +22,9 @@ public class Sale
 {
     public long Id { get; set; }
     public DateTime Timestamp { get; set; }
+
+    /// <summary>The user who rang up the sale.</summary>
+    public long? CashierId { get; set; }
     public List<SaleLine> Lines { get; set; } = [];
     public decimal Total { get; set; }
     public decimal VatAmount { get; set; }
