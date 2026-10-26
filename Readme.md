@@ -66,3 +66,8 @@ Then open http://localhost:5254. It works on PCs, tablets and phones.
 
 - Scan a barcode (or type a code/SKU) and press **Enter** to add it.
 - **F12** completes the sale.
+
+## Licence
+
+Proprietary software. Copyright (c) 2026 Wave Cyber Security Limited. All rights reserved.
+No use, copying, modification or distribution without written permission from Wave. See [LICENSE](LICENSE).
