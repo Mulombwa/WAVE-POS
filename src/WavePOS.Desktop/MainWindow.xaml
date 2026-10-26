@@ -1,0 +1,225 @@
+﻿<Window x:Class="WavePOS.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:WavePOS.Desktop.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:SalesViewModel}"
+        Title="WAVE POS" Height="800" Width="1280" MinHeight="600" MinWidth="1000"
+        WindowState="Maximized" Background="{StaticResource Surface}"
+        FontFamily="Segoe UI" FontSize="14">
+
+    <Window.InputBindings>
+        <KeyBinding Key="F12" Command="{Binding CompleteSaleCommand}" />
+    </Window.InputBindings>
+
+    <DockPanel>
+        <!-- Header -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource BrandDark}" Padding="20,12">
+            <DockPanel>
+                <TextBlock Text="WAVE POS" Foreground="White" FontSize="22" FontWeight="Bold" VerticalAlignment="Center" />
+                <TextBlock Text="Till 1 · Cashier" Foreground="#B9C6E4" HorizontalAlignment="Right" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
+        <!-- Status bar -->
+        <Border DockPanel.Dock="Bottom" Padding="20,8">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Background" Value="#E6F4EC" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding StatusIsError}" Value="True">
+                            <Setter Property="Background" Value="#FBE7E7" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <DockPanel>
+                <TextBlock Text="Enter = add scanned code   ·   F12 = complete sale" Foreground="{StaticResource Muted}"
+                           DockPanel.Dock="Right" />
+                <TextBlock Text="{Binding StatusMessage}" FontWeight="SemiBold" />
+            </DockPanel>
+        </Border>
+
+        <Grid Margin="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="440" />
+            </Grid.ColumnDefinitions>
+
+            <!-- LEFT: search + product tiles -->
+            <DockPanel Grid.Column="0">
+                <Border DockPanel.Dock="Top" Background="{StaticResource Card}" BorderBrush="{StaticResource Border}"
+                        BorderThickness="1" CornerRadius="8" Padding="12,4" Margin="0,0,0,12">
+                    <Grid>
+                        <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                 BorderThickness="0" FontSize="18" Padding="0,8" VerticalContentAlignment="Center">
+                            <TextBox.InputBindings>
+                                <KeyBinding Key="Enter" Command="{Binding ScanCommand}" />
+                            </TextBox.InputBindings>
+                        </TextBox>
+                        <TextBlock Text="Scan barcode or search products…" Foreground="{StaticResource Muted}" FontSize="18"
+                                   IsHitTestVisible="False" VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                </Border>
+
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Products}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Style="{StaticResource PosButton}" Width="170" Height="110" Margin="0,0,10,10"
+                                        Padding="10" HorizontalContentAlignment="Stretch"
+                                        Command="{Binding DataContext.AddProductCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}">
+                                    <StackPanel Width="148">
+                                        <TextBlock Text="{Binding Category}" Foreground="{StaticResource Muted}" FontSize="11" />
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"
+                                                   Height="40" Margin="0,2,0,4" />
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource Muted}" FontSize="11"
+                                                       VerticalAlignment="Bottom" Text="{Binding StockQuantity, StringFormat='{}{0} in stock'}" />
+                                            <TextBlock Text="{Binding Price, StringFormat='K{0:N2}'}" FontSize="16"
+                                                       FontWeight="Bold" Foreground="{StaticResource Brand}" />
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+
+            <!-- RIGHT: current sale -->
+            <Border Grid.Column="2" Background="{StaticResource Card}" BorderBrush="{StaticResource Border}"
+                    BorderThickness="1" CornerRadius="10">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="16,14,16,8">
+                        <Button DockPanel.Dock="Right" Content="Clear" Style="{StaticResource PosButton}" Padding="12,4"
+                                FontSize="13" Command="{Binding ClearCartCommand}" />
+                        <TextBlock Text="Current sale" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </DockPanel>
+
+                    <!-- Totals + payment pinned at the bottom -->
+                    <StackPanel DockPanel.Dock="Bottom" Margin="16">
+                        <Separator Margin="0,0,0,10" />
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding VatText}" Foreground="{StaticResource Muted}" />
+                            <TextBlock Text="VAT included" Foreground="{StaticResource Muted}" />
+                        </DockPanel>
+                        <DockPanel Margin="0,4,0,14">
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding TotalText}" FontSize="32" FontWeight="Bold" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="TOTAL" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding ItemCountText}" Foreground="{StaticResource Muted}" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <UniformGrid Columns="3" Margin="0,0,-6,10">
+                            <RadioButton Style="{StaticResource PayToggle}" Content="Cash" GroupName="Pay" IsChecked="{Binding IsCash}" />
+                            <RadioButton Style="{StaticResource PayToggle}" Content="Card" GroupName="Pay" IsChecked="{Binding IsCard}" />
+                            <RadioButton Style="{StaticResource PayToggle}" Content="Mobile Money" GroupName="Pay" IsChecked="{Binding IsMobileMoney}" />
+                        </UniformGrid>
+
+                        <!-- Cash only: amount received and change -->
+                        <StackPanel Visibility="{Binding IsCash, Converter={StaticResource BoolToVis}}">
+                            <DockPanel Margin="0,0,0,6">
+                                <TextBlock Text="Cash received" VerticalAlignment="Center" Width="110" />
+                                <TextBox Text="{Binding TenderedText, UpdateSourceTrigger=PropertyChanged}" FontSize="20"
+                                         Padding="6,4" HorizontalContentAlignment="Right" />
+                            </DockPanel>
+                            <UniformGrid Columns="5" Margin="0,0,0,8">
+                                <Button Style="{StaticResource PosButton}" Content="Exact" Margin="0,0,4,0" Padding="4,6" Command="{Binding ExactCashCommand}" />
+                                <Button Style="{StaticResource PosButton}" Content="K50" Margin="0,0,4,0" Padding="4,6" Command="{Binding QuickCashCommand}" CommandParameter="50" />
+                                <Button Style="{StaticResource PosButton}" Content="K100" Margin="0,0,4,0" Padding="4,6" Command="{Binding QuickCashCommand}" CommandParameter="100" />
+                                <Button Style="{StaticResource PosButton}" Content="K200" Margin="0,0,4,0" Padding="4,6" Command="{Binding QuickCashCommand}" CommandParameter="200" />
+                                <Button Style="{StaticResource PosButton}" Content="K500" Padding="4,6" Command="{Binding QuickCashCommand}" CommandParameter="500" />
+                            </UniformGrid>
+                            <DockPanel Margin="0,0,0,10">
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding ChangeText}" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Text="Change" FontSize="16" VerticalAlignment="Center" />
+                            </DockPanel>
+                        </StackPanel>
+
+                        <Button Style="{StaticResource PrimaryButton}" Content="Complete sale  (F12)" Height="60"
+                                Command="{Binding CompleteSaleCommand}" />
+                    </StackPanel>
+
+                    <!-- Cart lines -->
+                    <Grid>
+                        <TextBlock Text="No items yet" Foreground="{StaticResource Muted}" HorizontalAlignment="Center"
+                                   VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding CartLines.Count}" Value="0">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16,0">
+                            <ItemsControl ItemsSource="{Binding CartLines}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="0,8">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="90" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding UnitPrice, StringFormat='{}{0} each'}" Foreground="{StaticResource Muted}" FontSize="12" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Button Style="{StaticResource PosButton}" Content="−" Width="34" Height="34" Padding="0"
+                                                            Command="{Binding DataContext.DecreaseCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <TextBlock Text="{Binding Quantity}" Width="36" TextAlignment="Center" FontSize="16"
+                                                               FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                    <Button Style="{StaticResource PosButton}" Content="+" Width="34" Height="34" Padding="0"
+                                                            Command="{Binding DataContext.IncreaseCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="2" Text="{Binding LineTotal}" FontWeight="SemiBold" FontSize="15"
+                                                           TextAlignment="Right" VerticalAlignment="Center" />
+                                                <Button Grid.Column="3" Content="✕" Margin="8,0,0,0" Width="30" Height="30" Padding="0"
+                                                        Foreground="{StaticResource Danger}" Style="{StaticResource PosButton}" BorderThickness="0"
+                                                        ToolTip="Remove"
+                                                        Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

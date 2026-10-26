@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WavePOS.Core/WavePOS.Core.csproj" />
+    <Project Path="src/WavePOS.Data/WavePOS.Data.csproj" />
+    <Project Path="src/WavePOS.Desktop/WavePOS.Desktop.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WavePOS.Core.Tests/WavePOS.Core.Tests.csproj" />
+  </Folder>
+</Solution>
