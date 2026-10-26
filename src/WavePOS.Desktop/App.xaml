@@ -1,0 +1,79 @@
+﻿<Application x:Class="WavePOS.Desktop.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <!-- Brand colours -->
+        <SolidColorBrush x:Key="Brand" Color="#0B5FFF" />
+        <SolidColorBrush x:Key="BrandDark" Color="#0A2A66" />
+        <SolidColorBrush x:Key="Surface" Color="#F4F6FA" />
+        <SolidColorBrush x:Key="Card" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="Border" Color="#DDE2EC" />
+        <SolidColorBrush x:Key="Muted" Color="#6B7385" />
+        <SolidColorBrush x:Key="Success" Color="#12A150" />
+        <SolidColorBrush x:Key="Danger" Color="#D93A3A" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- Flat button used across the till -->
+        <Style x:Key="PosButton" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource Card}" />
+            <Setter Property="Foreground" Value="#1B2233" />
+            <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Brand}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.8" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource PosButton}">
+            <Setter Property="Background" Value="{StaticResource Success}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Success}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="20" />
+        </Style>
+
+        <!-- Payment method selector: radio buttons that look like buttons -->
+        <Style x:Key="PayToggle" TargetType="RadioButton">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="{StaticResource Card}" BorderBrush="{StaticResource Border}"
+                                BorderThickness="1" CornerRadius="8" Padding="8,10" Margin="0,0,6,0">
+                            <ContentPresenter HorizontalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Brand}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Brand}" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Application.Resources>
+</Application>
