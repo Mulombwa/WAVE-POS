@@ -72,6 +72,14 @@ public static class SystemAccounts
     public const string CostOfSales = "cost_of_sales";
     public const string StockLosses = "stock_losses";
     public const string BankCharges = "bank_charges";
+    public const string StaffAdvances = "staff_advances";
+    public const string PayePayable = "paye_payable";
+    public const string NapsaPayable = "napsa_payable";
+    public const string NhimaPayable = "nhima_payable";
+    public const string SkillsLevyPayable = "sdl_payable";
+    public const string WagesPayable = "wages_payable";
+    public const string Salaries = "salaries";
+    public const string EmployerContributions = "employer_contributions";
 
     /// <summary>Where the money from a sale goes, by how the customer paid.</summary>
     public static string ForPayment(Models.PaymentMethod method) => method switch
@@ -94,6 +102,7 @@ public static class DefaultChart
         new("1020", "Mobile money wallet", AccountType.Asset, SystemAccounts.MobileMoney, IsBank: true, Description: "Airtel Money, MTN MoMo or Zamtel Kwacha takings."),
         new("1030", "Card payments clearing", AccountType.Asset, SystemAccounts.CardClearing, Description: "Card sales waiting to be paid into the bank."),
         new("1100", "Accounts receivable", AccountType.Asset, SystemAccounts.Receivables, Description: "Money customers owe the business."),
+        new("1110", "Staff advances & loans", AccountType.Asset, SystemAccounts.StaffAdvances, Description: "Salary advances and loans to staff, recovered through payroll."),
         new("1200", "Inventory", AccountType.Asset, SystemAccounts.Inventory, Description: "Stock on hand at cost."),
         new("1300", "VAT input (claimable)", AccountType.Asset, SystemAccounts.VatInput, Description: "VAT paid on purchases, claimed back from ZRA."),
         new("1500", "Equipment & fittings", AccountType.Asset),
@@ -101,7 +110,11 @@ public static class DefaultChart
         new("2010", "Goods received not yet billed", AccountType.Liability, SystemAccounts.GoodsReceived,
             Description: "Stock delivered against a purchase order whose supplier bill hasn't been entered yet."),
         new("2100", "VAT output (owed to ZRA)", AccountType.Liability, SystemAccounts.VatOutput, Description: "VAT charged on sales."),
-        new("2200", "PAYE & NAPSA payable", AccountType.Liability),
+        new("2200", "PAYE payable", AccountType.Liability, SystemAccounts.PayePayable, Description: "Tax deducted from pay, due to ZRA by the 10th of the next month."),
+        new("2210", "NAPSA payable", AccountType.Liability, SystemAccounts.NapsaPayable, Description: "Employee and employer pension contributions due to NAPSA."),
+        new("2220", "NHIMA payable", AccountType.Liability, SystemAccounts.NhimaPayable, Description: "Employee and employer health insurance contributions due to NHIMA."),
+        new("2230", "Skills development levy payable", AccountType.Liability, SystemAccounts.SkillsLevyPayable, Description: "Employer's 0.5% levy due to ZRA."),
+        new("2240", "Net wages payable", AccountType.Liability, SystemAccounts.WagesPayable, Description: "Approved net pay not yet paid to staff."),
         new("2300", "Loans", AccountType.Liability),
         new("3000", "Owner's capital", AccountType.Equity, SystemAccounts.OwnerCapital),
         new("3100", "Owner's drawings", AccountType.Equity),
@@ -113,7 +126,8 @@ public static class DefaultChart
         new("5000", "Cost of sales", AccountType.Expense, SystemAccounts.CostOfSales, Description: "Cost price of goods sold."),
         new("5100", "Stock losses & adjustments", AccountType.Expense, SystemAccounts.StockLosses, Description: "Damaged, expired, stolen and stock-count differences."),
         new("6000", "Rent", AccountType.Expense),
-        new("6010", "Salaries & wages", AccountType.Expense),
+        new("6010", "Salaries & wages", AccountType.Expense, SystemAccounts.Salaries, Description: "Gross pay from payroll."),
+        new("6011", "Employer NAPSA, NHIMA & skills levy", AccountType.Expense, SystemAccounts.EmployerContributions, Description: "The employer's share of statutory contributions."),
         new("6020", "Electricity & water", AccountType.Expense),
         new("6030", "Phone & internet", AccountType.Expense),
         new("6040", "Transport & fuel", AccountType.Expense),

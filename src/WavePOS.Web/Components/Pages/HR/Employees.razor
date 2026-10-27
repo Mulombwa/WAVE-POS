@@ -1,0 +1,89 @@
+@page "/hr"
+@attribute [Authorize(Policy = nameof(Permission.ViewEmployees))]
+@rendermode InteractiveServer
+@inject HrRepository Hr
+
+<PageTitle>Employees · WAVE POS</PageTitle>
+
+<div class="page">
+    <HrNav Role="_role" />
+    <div class="page-head">
+        <h1>Employees</h1>
+        @if (_role.Can(Permission.ManageEmployees)) { <a class="btn primary" href="/hr/employees/new">Add employee</a> }
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat"><span>Employees</span><strong>@_summary.Headcount</strong></div>
+        <a class="stat" href="/hr/leave"><span>On leave today</span><strong>@_summary.OnLeaveToday</strong></a>
+        <a class="stat @(_summary.PendingLeave > 0 ? "warn" : "")" href="/hr/leave"><span>Leave waiting for approval</span><strong>@_summary.PendingLeave</strong></a>
+        <div class="stat @(_summary.ContractsEndingSoon > 0 ? "warn" : "")"><span>Contracts ending in 30 days</span><strong>@_summary.ContractsEndingSoon</strong></div>
+        <div class="stat @(_summary.WithoutContract > 0 ? "danger" : "")"><span>No contract (not paid)</span><strong>@_summary.WithoutContract</strong></div>
+    </div>
+
+    <div class="filters">
+        <input type="search" placeholder="Search name, number, job or department…" @bind="Search" @bind:event="oninput" aria-label="Search employees" />
+        <label class="check inline"><input type="checkbox" @bind="ShowLeft" /> Include people who have left</label>
+    </div>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>No.</th><th>Name</th><th>Job</th><th>Department</th><th>Started</th><th>Contract</th></tr></thead>
+            <tbody>
+                @foreach (var e in _employees)
+                {
+                    var c = _contracts.GetValueOrDefault(e.Id);
+                    <tr class="@(e.Status == EmployeeStatus.Left ? "inactive" : "")">
+                        <td class="mono">@e.Number</td>
+                        <td>
+                            <a href="/hr/employees/@e.Id">@e.Name</a>
+                            @if (e.Status == EmployeeStatus.Left) { <span class="badge">Left @e.LeftDate?.ToString("dd MMM yyyy")</span> }
+                            @if (_onLeave.Contains(e.Id)) { <span class="badge info">On leave</span> }
+                        </td>
+                        <td>@e.JobTitle</td>
+                        <td>@e.Department</td>
+                        <td class="nowrap">@e.HireDate.ToString("dd MMM yyyy")</td>
+                        <td>
+                            @if (c is null) { <span class="badge danger">None</span> }
+                            else
+                            {
+                                <span>@c.Type.Label()</span>
+                                @if (c.EndDate is { } end) { <span class="muted"> to @end.ToString("dd MMM yyyy")</span> @if (end <= Today.AddDays(30)) { <span class="badge warn">Ending soon</span> } }
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (_employees.Count == 0) { <tr><td colspan="6" class="muted empty">No employees yet.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private UserRole _role;
+    private HrSummary _summary = new(0, 0, 0, 0, 0);
+    private List<Employee> _employees = [];
+    private Dictionary<long, Contract?> _contracts = [];
+    private HashSet<long> _onLeave = [];
+    private string _search = "";
+    private bool _showLeft;
+
+    private string Search { get => _search; set { _search = value; Load(); } }
+    private bool ShowLeft { get => _showLeft; set { _showLeft = value; Load(); } }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        _summary = Hr.Summary();
+        _onLeave = Hr.OnLeave(Today).Select(r => r.EmployeeId).ToHashSet();
+        Load();
+    }
+
+    private void Load()
+    {
+        _employees = Hr.Employees(_showLeft, _search);
+        _contracts = _employees.ToDictionary(e => e.Id, e => Hr.ContractOn(e.Id, Today));
+    }
+}

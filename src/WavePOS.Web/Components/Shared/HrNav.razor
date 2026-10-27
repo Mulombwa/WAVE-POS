@@ -1,0 +1,12 @@
+@* Sub-menu for the HR and payroll pages, filtered by what the signed-in person may do. *@
+<nav class="subnav" aria-label="HR and payroll">
+    <NavLink href="/hr" Match="NavLinkMatch.All">Employees</NavLink>
+    <NavLink href="/hr/leave">Leave</NavLink>
+    @if (Role.Can(Permission.RecordAttendance)) { <NavLink href="/hr/attendance">Attendance</NavLink> }
+    @if (Role.Can(Permission.RunPayroll)) { <NavLink href="/hr/payroll" Match="NavLinkMatch.All">Payroll</NavLink> }
+    @if (Role.Can(Permission.RunPayroll)) { <NavLink href="/hr/payroll/rates">Tax &amp; contribution rates</NavLink> }
+</nav>
+
+@code {
+    [Parameter, EditorRequired] public UserRole Role { get; set; }
+}

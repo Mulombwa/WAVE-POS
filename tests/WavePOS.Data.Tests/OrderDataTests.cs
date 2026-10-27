@@ -241,14 +241,22 @@ public sealed class OrderDataTests : IDisposable
     [Fact]
     public void Older_databases_get_the_new_goods_received_account()
     {
+        // The business already used code 2010 for something else, with postings: a new account is added beside it.
+        var old = _ledger.Accounts().Single(a => a.SystemKey == SystemAccounts.GoodsReceived);
+        _ledger.PostJournal(new JournalDraft
+        {
+            Date = Today, Memo = "Accrual",
+            Lines = [new(AccountId(SystemAccounts.Cash), 10m, 0), new(old.Id, 0, 10m)],
+        }, _ann);
         using (var conn = _db.Open())
         using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "UPDATE accounts SET system_key = NULL WHERE system_key = 'goods_received';";
+            cmd.CommandText = "UPDATE accounts SET system_key = NULL, name = 'Supplier accruals' WHERE system_key = 'goods_received';";
             cmd.ExecuteNonQuery();
         }
         _db.Initialize();
         var added = _ledger.Accounts().Single(a => a.SystemKey == SystemAccounts.GoodsReceived);
-        Assert.Equal("2010-1", added.Code); // 2010 was still taken
+        Assert.Equal("2010-1", added.Code); // 2010 was taken by an account in use
+        Assert.Equal("Supplier accruals", _ledger.GetAccount(old.Id)!.Name);
     }
 }

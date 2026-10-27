@@ -1,0 +1,121 @@
+@page "/hr/attendance"
+@attribute [Authorize(Policy = nameof(Permission.RecordAttendance))]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject HrRepository Hr
+
+<PageTitle>Attendance · WAVE POS</PageTitle>
+
+<div class="page">
+    <HrNav Role="_role" />
+    <h1>Attendance register</h1>
+    <p class="muted">
+        Mark each person for the day. Overtime is paid at 1.5 × the hourly rate in that month's payroll.
+        Absences that aren't covered by approved leave are deducted from pay.
+    </p>
+
+    <div class="filters">
+        <label class="field inline"><span>Day</span><input type="date" value="@_date.ToString("yyyy-MM-dd")" max="@Today.ToString("yyyy-MM-dd")" @onchange="ChangeDate" /></label>
+        <button type="button" class="btn small outline" @onclick="() => SetDate(_date.AddDays(-1))">← Previous day</button>
+        <button type="button" class="btn small outline" disabled="@(_date >= Today)" @onclick="() => SetDate(_date.AddDays(1))">Next day →</button>
+        @if (!HrRules.IsWorkingDay(_date)) { <span class="badge">Weekend</span> }
+        @if (_saved) { <span class="badge ok">Saved</span> } else if (_rows.Count > 0) { <span class="badge warn">Not saved yet</span> }
+    </div>
+    @if (_message is not null) { <div class="alert @(_isError ? "error" : "success")" role="status">@_message</div> }
+
+    <div class="table-wrap card">
+        <table class="data journal-lines">
+            <thead><tr><th>Employee</th><th>Status</th><th class="num">Hours worked</th><th class="num">Overtime hours</th><th>Note</th></tr></thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr>
+                        <td>@row.Name @if (row.LeaveType is { } lt) { <span class="badge info">@lt.Label() leave</span> }</td>
+                        <td>
+                            <select @bind="row.Status" aria-label="Status for @row.Name">
+                                @foreach (var s in Enum.GetValues<AttendanceStatus>()) { <option value="@s">@s.Label()</option> }
+                            </select>
+                        </td>
+                        <td class="num"><input class="money-input" type="number" min="0" max="24" step="0.5" @bind="row.Hours" aria-label="Hours worked" /></td>
+                        <td class="num"><input class="money-input" type="number" min="0" max="24" step="0.5" @bind="row.Overtime" aria-label="Overtime hours" /></td>
+                        <td><input @bind="row.Note" aria-label="Note" /></td>
+                    </tr>
+                }
+                @if (_rows.Count == 0) { <tr><td colspan="5" class="muted empty">No employees working here on this day.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+    <div class="actions-row">
+        <button type="button" class="btn primary" disabled="@(_rows.Count == 0)" @onclick="Save">Save register</button>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private sealed class Row
+    {
+        public long EmployeeId { get; init; }
+        public string Name { get; init; } = "";
+        public LeaveType? LeaveType { get; init; }
+        public AttendanceStatus Status { get; set; }
+        public decimal Hours { get; set; }
+        public decimal Overtime { get; set; }
+        public string Note { get; set; } = "";
+    }
+
+    private UserRole _role;
+    private DateOnly _date = Today;
+    private List<Row> _rows = [];
+    private bool _saved;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        Load();
+    }
+
+    private void ChangeDate(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParseExact(e.Value?.ToString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)) SetDate(d);
+    }
+
+    private void SetDate(DateOnly d)
+    {
+        _date = d > Today ? Today : d;
+        _message = null;
+        Load();
+    }
+
+    private void Load()
+    {
+        var saved = Hr.Attendance(_date).ToDictionary(r => r.EmployeeId);
+        var leave = Hr.OnLeave(_date).GroupBy(r => r.EmployeeId).ToDictionary(g => g.Key, g => g.First().Type);
+        _saved = saved.Count > 0;
+        _rows = Hr.Employees(includeLeft: true)
+            .Where(e => e.HireDate <= _date && (e.LeftDate is null || e.LeftDate >= _date))
+            .Select(e =>
+            {
+                var onLeave = leave.TryGetValue(e.Id, out var lt) ? lt : (LeaveType?)null;
+                if (saved.TryGetValue(e.Id, out var r))
+                    return new Row { EmployeeId = e.Id, Name = e.Name, LeaveType = onLeave, Status = r.Status, Hours = r.HoursWorked, Overtime = r.OvertimeHours, Note = r.Note };
+                var status = onLeave is not null ? AttendanceStatus.OnLeave : HrRules.IsWorkingDay(_date) ? AttendanceStatus.Present : AttendanceStatus.DayOff;
+                return new Row { EmployeeId = e.Id, Name = e.Name, LeaveType = onLeave, Status = status, Hours = status == AttendanceStatus.Present ? 9 : 0 };
+            })
+            .ToList();
+    }
+
+    private async Task Save()
+    {
+        try
+        {
+            Hr.SaveAttendance(_date, _rows.Select(r => new AttendanceRecord(r.EmployeeId, _date, r.Status, r.Hours, r.Overtime, r.Note)).ToList(),
+                (await AuthState).User.ToActor());
+            (_message, _isError, _saved) = ($"Register for {_date:dddd dd MMM yyyy} saved.", false, true);
+        }
+        catch (ArgumentException ex) { (_message, _isError) = (ex.Message, true); }
+    }
+}

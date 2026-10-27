@@ -105,6 +105,7 @@
         (JournalSource.Bank, _) => ("/accounting/bank", "Bank reconciliation", false),
         (JournalSource.Purchase, { } id) => ($"/purchasing/orders/{id}", $"Purchase order PO{long.Parse(id):D6}", false),
         (JournalSource.SalesOrder, { } id) => ($"/sales/orders/{id}", $"Sales order SO{long.Parse(id):D6}", false),
+        (JournalSource.Payroll, { } id) => ($"/hr/payroll/{id}", "Payroll", false),
         (JournalSource.Reversal, { } id) => ($"/accounting/journals/{id}", $"Reverses J{long.Parse(id):D6}", false),
         _ => null,
     };

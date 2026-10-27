@@ -103,4 +103,19 @@ public static class AuditActions
     public const string InvoiceRaised = "orders.invoiced";
     public const string PaymentReceived = "orders.payment_received";
     public const string CreditTermsChanged = "orders.credit_terms";
+
+    public const string EmployeeCreated = "hr.employee_created";
+    public const string EmployeeUpdated = "hr.employee_updated";
+    public const string EmployeeViewed = "hr.employee_viewed";
+    public const string ContractAdded = "hr.contract_added";
+    public const string LeaveRequested = "hr.leave_requested";
+    public const string LeaveDecided = "hr.leave_decided";
+    public const string AttendanceRecorded = "hr.attendance";
+
+    public const string PayrollPrepared = "payroll.prepared";
+    public const string PayrollAdjusted = "payroll.adjusted";
+    public const string PayrollApproved = "payroll.approved";
+    public const string PayrollPaid = "payroll.paid";
+    public const string PayrollDeleted = "payroll.deleted";
+    public const string PayrollRatesChanged = "payroll.rates";
 }

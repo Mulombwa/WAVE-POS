@@ -1,0 +1,134 @@
+@page "/hr/payroll/rates"
+@attribute [Authorize(Policy = nameof(Permission.RunPayroll))]
+@rendermode InteractiveServer
+@inject PayrollRepository Payroll
+
+<PageTitle>Tax &amp; contribution rates · WAVE POS</PageTitle>
+
+<div class="page">
+    <HrNav Role="_role" />
+    <h1>Tax &amp; contribution rates</h1>
+    <p class="muted">
+        PAYE bands change with the national budget, and NAPSA reviews its earnings ceiling every January. Each payroll uses the
+        table in force at the end of its month. When ZRA or NAPSA announce new figures, add a new table from the date they apply.
+        Check the built-in figures against the latest ZRA practice note and NAPSA notice before your first payroll.
+    </p>
+    @if (_message is not null) { <div class="alert @(_isError ? "error" : "success")" role="status">@_message</div> }
+
+    @foreach (var t in _tables.AsEnumerable().Reverse())
+    {
+        <section class="card">
+            <h2>From @t.EffectiveFrom.ToString("dd MMMM yyyy") @if (t == _current) { <span class="badge ok">In force today</span> }</h2>
+            <div class="two-col">
+                <table class="totals-table left">
+                    @{ decimal lower = 0; }
+                    @foreach (var b in t.PayeBands)
+                    {
+                        <tr><td>PAYE @(b.UpTo is { } up ? $"{Money.Format(lower)} – {Money.Format(up)}" : $"above {Money.Format(lower)}") a month</td><td>@($"{b.Rate * 100:0.##}%")</td></tr>
+                        lower = b.UpTo ?? lower;
+                    }
+                </table>
+                <table class="totals-table left">
+                    <tr><td>NAPSA, each of employee and employer</td><td>@($"{t.NapsaRate * 100:0.##}%")</td></tr>
+                    <tr><td>NAPSA earnings ceiling a month</td><td>@Money.Format(t.NapsaEarningsCeiling)</td></tr>
+                    <tr><td>NHIMA, each of employee and employer</td><td>@($"{t.NhimaRate * 100:0.##}%") of @(t.NhimaOnBasicPay ? "basic" : "gross") pay</td></tr>
+                    <tr><td>Skills development levy (employer)</td><td>@($"{t.SkillsLevyRate * 100:0.##}%") of gross</td></tr>
+                    <tr><td>Employee NAPSA taken off before PAYE</td><td>@(t.NapsaReducesTaxablePay ? "Yes" : "No")</td></tr>
+                </table>
+            </div>
+            <p class="muted small">@t.Source</p>
+        </section>
+    }
+
+    @if (_role.Can(Permission.ApprovePayroll))
+    {
+        <details class="card" open="@_editing">
+            <summary @onclick="StartNew">Add a new rates table</summary>
+            <div class="three-col">
+                <label class="field"><span>Applies from</span><input type="date" @bind="_newFrom" /></label>
+                <label class="field"><span>NAPSA earnings ceiling (K a month)</span><input type="number" min="0" step="1" @bind="_ceiling" /></label>
+                <label class="field"><span>NAPSA rate (%)</span><input type="number" min="0" max="100" step="0.1" @bind="_napsa" /></label>
+                <label class="field"><span>NHIMA rate (%)</span><input type="number" min="0" max="100" step="0.1" @bind="_nhima" /></label>
+                <label class="field"><span>Skills levy (%)</span><input type="number" min="0" max="100" step="0.1" @bind="_sdl" /></label>
+                <label class="field">
+                    <span>NHIMA charged on</span>
+                    <select @bind="_nhimaOnBasic"><option value="true">Basic pay</option><option value="false">Gross pay</option></select>
+                </label>
+            </div>
+            <label class="check"><input type="checkbox" @bind="_napsaFirst" /> Take the employee's NAPSA off gross pay before working out PAYE</label>
+            <h2 class="sub">PAYE bands (monthly)</h2>
+            <table class="data journal-lines">
+                <thead><tr><th>Up to (K a month; blank = no limit)</th><th>Rate (%)</th></tr></thead>
+                <tbody>
+                    @foreach (var b in _bands)
+                    {
+                        <tr>
+                            <td><input type="number" min="0" step="1" @bind="b.UpTo" aria-label="Band upper limit" /></td>
+                            <td><input type="number" min="0" max="100" step="0.1" @bind="b.Rate" aria-label="Band rate" /></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <div class="actions-row left">
+                <button type="button" class="btn outline small" @onclick="() => _bands.Insert(_bands.Count - 1, new BandInput())">Add a band</button>
+                <button type="button" class="btn primary" @onclick="Save">Save rates table</button>
+            </div>
+        </details>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private sealed class BandInput { public decimal? UpTo { get; set; } public decimal Rate { get; set; } }
+
+    private UserRole _role;
+    private List<PayrollRates> _tables = [];
+    private PayrollRates? _current;
+    private bool _editing;
+    private DateOnly _newFrom = new(DateTime.Today.Year + 1, 1, 1);
+    private decimal _ceiling, _napsa, _nhima, _sdl;
+    private bool _nhimaOnBasic, _napsaFirst;
+    private List<BandInput> _bands = [];
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        Load();
+    }
+
+    private void Load()
+    {
+        _tables = Payroll.Rates();
+        _current = PayrollRates.For(DateOnly.FromDateTime(DateTime.Today), _tables);
+    }
+
+    // Starts from the table in force, so only the changes need typing.
+    private void StartNew()
+    {
+        var t = _current!;
+        (_ceiling, _napsa, _nhima, _sdl) = (t.NapsaEarningsCeiling, t.NapsaRate * 100, t.NhimaRate * 100, t.SkillsLevyRate * 100);
+        (_nhimaOnBasic, _napsaFirst) = (t.NhimaOnBasicPay, t.NapsaReducesTaxablePay);
+        _bands = t.PayeBands.Select(b => new BandInput { UpTo = b.UpTo, Rate = b.Rate * 100 }).ToList();
+        _editing = true;
+    }
+
+    private async Task Save()
+    {
+        try
+        {
+            Payroll.SaveRates(new PayrollRates
+            {
+                EffectiveFrom = _newFrom,
+                PayeBands = _bands.Select(b => new TaxBand(b.UpTo, b.Rate / 100)).ToList(),
+                NapsaRate = _napsa / 100, NapsaEarningsCeiling = _ceiling, NhimaRate = _nhima / 100, NhimaOnBasicPay = _nhimaOnBasic,
+                SkillsLevyRate = _sdl / 100, NapsaReducesTaxablePay = _napsaFirst,
+            }, (await AuthState).User.ToActor());
+            (_message, _isError, _editing) = ($"Rates from {_newFrom:dd MMM yyyy} saved.", false, false);
+            Load();
+        }
+        catch (ArgumentException ex) { (_message, _isError) = (ex.Message, true); }
+    }
+}

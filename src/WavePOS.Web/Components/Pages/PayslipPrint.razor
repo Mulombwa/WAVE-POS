@@ -1,0 +1,110 @@
+@page "/print/payslip/{Id:long}"
+@page "/print/payslips/{RunId:long}"
+@attribute [Authorize]
+@layout BareLayout
+@inject PayrollRepository Payroll
+@inject SettingsRepository Settings
+
+@* Payslips on A4, one per page, for printing or saving as PDF. *@
+<PageTitle>Payslips · WAVE POS</PageTitle>
+<HeadContent><style>@("@page { size: A4; margin: 0; }")</style></HeadContent>
+
+<div class="doc-screen">
+    <div class="doc-toolbar no-print">
+        <div>
+            <strong>@(_slips.Count == 1 ? $"Payslip {_slips[0].EmployeeName}, {Period(_slips[0].Period)}" : $"{_slips.Count} payslips")</strong>
+            <span class="muted">To save as PDF, click Print and choose “Save as PDF”. Payslips are confidential.</span>
+        </div>
+        @if (_slips.Count > 0) { <div class="doc-toolbar-actions"><button type="button" class="btn primary" onclick="window.print()">Print…</button></div> }
+    </div>
+
+    @if (_slips.Count == 0)
+    {
+        <p class="doc-missing">@(_denied ? "You aren't allowed to see payslips." : "Payslip not found.")</p>
+    }
+    @foreach (var p in _slips)
+    {
+        var r = p.Result;
+        <article class="doc doc-a4 payslip">
+            <header class="a4-head">
+                <div>
+                    <img class="doc-logo" src="@Branding.LogoUrl(_business)" alt="@_business.Name logo" />
+                    <div class="biz-name">@_business.Name</div>
+                    @if (_business.Tpin.Length > 0) { <div class="muted">TPIN: @_business.Tpin</div> }
+                </div>
+                <div class="right">
+                    <h1 class="doc-title">Payslip</h1>
+                    <dl class="pairs right-labels">
+                        <dt>Pay period</dt><dd><strong>@Period(p.Period)</strong></dd>
+                        <dt>Employee no.</dt><dd>@p.EmployeeNumber</dd>
+                        <dt>Paid by</dt><dd>@(p.PayMethod switch { PayMethod.Bank => "Bank transfer", PayMethod.MobileMoney => "Mobile money", _ => "Cash" })</dd>
+                    </dl>
+                </div>
+            </header>
+
+            <section class="bill-to">
+                <div class="label">EMPLOYEE</div>
+                <strong>@p.EmployeeName</strong>
+                <div class="muted">@p.JobTitle@(p.Department.Length > 0 ? $", {p.Department}" : "")</div>
+                <div class="muted">NRC @p.Nrc · TPIN @p.Tpin · NAPSA @p.NapsaNumber</div>
+            </section>
+
+            <div class="payslip-cols">
+                <table class="items">
+                    <thead><tr><th>Earnings</th><th class="num">Amount</th></tr></thead>
+                    <tbody>
+                        <tr><td>Basic pay</td><td class="num">@Money.Format(p.Basic)</td></tr>
+                        @if (p.Allowances > 0) { <tr><td>Allowances</td><td class="num">@Money.Format(p.Allowances)</td></tr> }
+                        @if (p.OvertimePay > 0) { <tr><td>Overtime (@p.OvertimeHours.ToString("0.#") h at 1.5×)</td><td class="num">@Money.Format(p.OvertimePay)</td></tr> }
+                        @if (p.Bonus > 0) { <tr><td>Bonus</td><td class="num">@Money.Format(p.Bonus)</td></tr> }
+                        @if (p.UnpaidDeduction > 0) { <tr><td>Unpaid days (@p.UnpaidDays.ToString("0.#"))</td><td class="num">-@Money.Format(p.UnpaidDeduction)</td></tr> }
+                        <tr class="total-row"><td>Gross pay</td><td class="num">@Money.Format(r.Gross)</td></tr>
+                    </tbody>
+                </table>
+                <table class="items">
+                    <thead><tr><th>Deductions</th><th class="num">Amount</th></tr></thead>
+                    <tbody>
+                        <tr><td>PAYE</td><td class="num">@Money.Format(r.Paye)</td></tr>
+                        <tr><td>NAPSA</td><td class="num">@Money.Format(r.NapsaEmployee)</td></tr>
+                        <tr><td>NHIMA</td><td class="num">@Money.Format(r.NhimaEmployee)</td></tr>
+                        @if (r.OtherDeductions > 0) { <tr><td>@(p.OtherDeductionsNote.Length > 0 ? p.OtherDeductionsNote : "Other deductions")</td><td class="num">@Money.Format(r.OtherDeductions)</td></tr> }
+                        <tr class="total-row"><td>Total deductions</td><td class="num">@Money.Format(r.TotalDeductions)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <table class="totals">
+                <tr class="grand"><td>Net pay</td><td>@Money.Format(r.Net)</td></tr>
+            </table>
+
+            <p class="muted note">
+                Paid by the employer on top of your pay: NAPSA @Money.Format(r.NapsaEmployer), NHIMA @Money.Format(r.NhimaEmployer).
+                Taxable pay @Money.Format(r.Taxable). Annual leave available at month end: @p.AnnualLeaveBalance.ToString("0.#") days.
+            </p>
+        </article>
+    }
+    <div class="doc-footer no-print"><BuiltByWave /></div>
+</div>
+
+@code {
+    [Parameter] public long? Id { get; set; }
+    [Parameter] public long? RunId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private BusinessProfile _business = new();
+    private List<Payslip> _slips = [];
+    private bool _denied;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var role = (await AuthState).User.ToUser().Role;
+        if (!role.Can(Permission.RunPayroll) && !role.Can(Permission.ManageEmployees)) { _denied = true; return; }
+        _business = Settings.GetBusinessProfile();
+        if (Id is { } id && Payroll.GetPayslip(id) is { } slip) _slips = [slip];
+        else if (RunId is { } run && Payroll.GetRun(run) is { } r) _slips = r.Payslips;
+    }
+
+    private static string Period(string p) =>
+        new DateOnly(int.Parse(p[..4], System.Globalization.CultureInfo.InvariantCulture), int.Parse(p[5..], System.Globalization.CultureInfo.InvariantCulture), 1)
+            .ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+}

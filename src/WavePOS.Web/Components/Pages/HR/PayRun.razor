@@ -1,0 +1,234 @@
+@page "/hr/payroll/{Id:long}"
+@attribute [Authorize(Policy = nameof(Permission.RunPayroll))]
+@rendermode InteractiveServer
+@using System.Text
+@inject PayrollRepository Payroll
+@inject LedgerRepository Ledger
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Payroll @(_run?.Title) · WAVE POS</PageTitle>
+
+<div class="page">
+    <HrNav Role="_role" />
+    @if (_run is null)
+    {
+        <h1>Payroll not found</h1>
+        <a href="/hr/payroll">Back to payroll</a>
+    }
+    else
+    {
+        <div class="page-head">
+            <h1>Payroll @_run.Title <span class="badge @(_run.Status switch { PayrollStatus.Draft => "warn", PayrollStatus.Approved => "info", _ => "ok" })">@_run.Status</span></h1>
+            <div class="row-actions">
+                <a class="btn outline" href="/print/payslips/@_run.Id" target="_blank" rel="noopener">Print all payslips</a>
+                <button type="button" class="btn outline" @onclick="BankSchedule">Payment list (CSV)</button>
+            </div>
+        </div>
+
+        @if (Skipped is { Length: > 0 } s) { <div class="alert warn" role="status">Left out: @s</div> }
+        @if (_message is not null) { <div class="alert @(_isError ? "error" : "success")" role="status">@_message</div> }
+
+        <div class="stat-grid">
+            <div class="stat"><span>Gross pay</span><strong>@Money.Format(_run.Gross)</strong></div>
+            <div class="stat"><span>Net pay to staff</span><strong>@Money.Format(_run.Net)</strong></div>
+            <div class="stat"><span>Cost to the business</span><strong>@Money.Format(_run.EmployerCost)</strong></div>
+            <div class="stat"><span>Prepared by</span><strong class="small-strong">@_run.PreparedBy</strong></div>
+            @if (_run.ApprovedBy is { } by) { <div class="stat"><span>Approved by</span><strong class="small-strong">@by</strong></div> }
+        </div>
+
+        <div class="table-wrap card">
+            <table class="data payroll-table">
+                <thead>
+                    <tr>
+                        <th>Employee</th><th class="num">Basic</th><th class="num">Allowances</th><th class="num">Overtime</th><th class="num">Bonus</th>
+                        <th class="num">Unpaid</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">NAPSA</th><th class="num">NHIMA</th>
+                        <th class="num">Other</th><th class="num">Net pay</th><th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in _run.Payslips)
+                    {
+                        <tr>
+                            <td><a href="/hr/employees/@p.EmployeeId">@p.EmployeeName</a><div class="muted small">@p.EmployeeNumber · @p.JobTitle</div></td>
+                            <td class="num">@Money.Format(p.Basic)</td>
+                            <td class="num">@Money.Format(p.Allowances)</td>
+                            <td class="num">@Money.Format(p.OvertimePay)@if (p.OvertimeHours > 0) { <div class="muted small">@p.OvertimeHours.ToString("0.#") h</div> }</td>
+                            <td class="num">@Money.Format(p.Bonus)</td>
+                            <td class="num">@(p.UnpaidDeduction > 0 ? $"-{Money.Format(p.UnpaidDeduction)}" : "")@if (p.UnpaidDays > 0) { <div class="muted small">@p.UnpaidDays.ToString("0.#") day(s)</div> }</td>
+                            <td class="num">@Money.Format(p.Result.Gross)</td>
+                            <td class="num">@Money.Format(p.Result.Paye)</td>
+                            <td class="num">@Money.Format(p.Result.NapsaEmployee)</td>
+                            <td class="num">@Money.Format(p.Result.NhimaEmployee)</td>
+                            <td class="num" title="@p.OtherDeductionsNote">@Money.Format(p.Result.OtherDeductions)</td>
+                            <td class="num"><strong>@Money.Format(p.Result.Net)</strong></td>
+                            <td class="row-actions">
+                                @if (_run.Status == PayrollStatus.Draft) { <button type="button" class="btn small outline" @onclick="() => StartAdjust(p)">Adjust</button> }
+                                <a class="btn small outline" href="/print/payslip/@p.Id" target="_blank" rel="noopener">Payslip</a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <th>Totals (@_run.Payslips.Count)</th>
+                        <th class="num">@Money.Format(_run.Payslips.Sum(p => p.Basic))</th>
+                        <th class="num">@Money.Format(_run.Payslips.Sum(p => p.Allowances))</th>
+                        <th class="num">@Money.Format(_run.Payslips.Sum(p => p.OvertimePay))</th>
+                        <th class="num">@Money.Format(_run.Payslips.Sum(p => p.Bonus))</th>
+                        <th class="num">@Money.Format(_run.Payslips.Sum(p => p.UnpaidDeduction))</th>
+                        <th class="num">@Money.Format(_run.Gross)</th>
+                        <th class="num">@Money.Format(_run.Paye)</th>
+                        <th class="num">@Money.Format(_run.Payslips.Sum(p => p.Result.NapsaEmployee))</th>
+                        <th class="num">@Money.Format(_run.Payslips.Sum(p => p.Result.NhimaEmployee))</th>
+                        <th class="num">@Money.Format(_run.Payslips.Sum(p => p.Result.OtherDeductions))</th>
+                        <th class="num">@Money.Format(_run.Net)</th>
+                        <th></th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <div class="two-col">
+            <section class="card">
+                <h2>Due to the authorities by @_run.StatutoryDueDate.ToString("dd MMM yyyy")</h2>
+                <table class="totals-table left">
+                    <tr><td>PAYE to ZRA</td><td>@Money.Format(_run.Paye)</td></tr>
+                    <tr><td>NAPSA (employee + employer)</td><td>@Money.Format(_run.Napsa)</td></tr>
+                    <tr><td>NHIMA (employee + employer)</td><td>@Money.Format(_run.Nhima)</td></tr>
+                    <tr><td>Skills development levy to ZRA</td><td>@Money.Format(_run.SkillsLevy)</td></tr>
+                    <tr class="grand"><td>Total</td><td>@Money.Format(_run.Paye + _run.Napsa + _run.Nhima + _run.SkillsLevy)</td></tr>
+                </table>
+                <p class="muted small">
+                    Rates used: the table from @_run.RatesFrom.ToString("dd MMM yyyy") (<a href="/hr/payroll/rates">see rates</a>). File the returns on ZRA TaxOnline,
+                    NAPSA and NHIMA portals. When you pay them, give the bank statement lines the PAYE, NAPSA, NHIMA and skills levy payable accounts.
+                </p>
+            </section>
+
+            <section class="card">
+                <h2>Next step</h2>
+                @switch (_run.Status)
+                {
+                    case PayrollStatus.Draft:
+                        <p class="muted">Check each payslip. Changed attendance, leave or contracts? Recalculate first. Approving posts the payroll to the books.</p>
+                        <div class="actions-row left">
+                            <button type="button" class="btn outline" @onclick="Recalculate">Recalculate</button>
+                            @if (_role.Can(Permission.ApprovePayroll)) { <button type="button" class="btn primary" @onclick="Approve">Approve payroll</button> }
+                            else { <span class="muted">A manager approves it.</span> }
+                        </div>
+                        <details class="sub-form"><summary>Delete this draft</summary>
+                            <button type="button" class="btn danger-solid" @onclick="Delete">Delete draft payroll</button></details>
+                        break;
+                    case PayrollStatus.Approved:
+                        <p class="muted">Approved and in the books (<a href="/accounting/journals/@_run.JournalEntryId">J@(_run.JournalEntryId?.ToString("D6"))</a>). Pay staff, then record it.</p>
+                        @if (_role.Can(Permission.ApprovePayroll) || _role.Can(Permission.ManageAccounts))
+                        {
+                            <div class="lookup">
+                                <label class="field"><span>Paid on</span><input type="date" @bind="_payDate" /></label>
+                                <label class="field">
+                                    <span>Paid from</span>
+                                    <select @bind="_payFrom">@foreach (var a in _moneyAccounts) { <option value="@a.Id">@a.Display</option> }</select>
+                                </label>
+                                <button type="button" class="btn primary" @onclick="Pay">Record wages paid (@Money.Format(_run.Net))</button>
+                            </div>
+                        }
+                        break;
+                    default:
+                        <p>Paid on @_run.PaidOn?.ToString("dd MMM yyyy") (<a href="/accounting/journals/@_run.PaymentEntryId">J@(_run.PaymentEntryId?.ToString("D6"))</a>). The payment shows up for matching on the bank reconciliation page.</p>
+                        break;
+                }
+            </section>
+        </div>
+    }
+</div>
+
+@if (_adjusting is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _adjusting = null"></div>
+    <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="adjust-title">
+        <h2 id="adjust-title">Adjust @_adjusting.EmployeeName's pay</h2>
+        <label class="field"><span>Bonus or commission (taxable, K)</span><input type="number" min="0" step="0.01" @bind="_bonus" /></label>
+        <label class="field"><span>Other deductions after tax (K)</span><input type="number" min="0" step="0.01" @bind="_other" /></label>
+        <label class="field"><span>What the deduction is for</span><input @bind="_otherNote" placeholder="e.g. Salary advance of 3 Sept" /></label>
+        <p class="muted small">Deductions are recovered into the Staff advances &amp; loans account.</p>
+        <div class="modal-actions">
+            <button type="button" class="btn outline" @onclick="() => _adjusting = null">Cancel</button>
+            <button type="button" class="btn primary" @onclick="SaveAdjust">Save</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+    [SupplyParameterFromQuery(Name = "skipped")] public string? Skipped { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private UserRole _role;
+    private PayrollRun? _run;
+    private List<Account> _moneyAccounts = [];
+    private DateOnly _payDate = DateOnly.FromDateTime(DateTime.Today);
+    private long _payFrom;
+    private Payslip? _adjusting;
+    private decimal _bonus, _other;
+    private string _otherNote = "";
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        _moneyAccounts = Ledger.MoneyAccounts();
+        _payFrom = _moneyAccounts.FirstOrDefault(a => a.SystemKey == SystemAccounts.Bank)?.Id ?? _moneyAccounts.FirstOrDefault()?.Id ?? 0;
+        _run = Payroll.GetRun(Id);
+    }
+
+    private async Task Do(Action<WavePOS.Core.Audit.Actor> action, string done)
+    {
+        try
+        {
+            action((await AuthState).User.ToActor());
+            (_message, _isError) = (done, false);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { (_message, _isError) = (ex.Message, true); }
+        _run = Payroll.GetRun(Id);
+    }
+
+    private Task Recalculate() => Do(a =>
+    {
+        var skipped = Payroll.Recalculate(Id, a);
+        Skipped = skipped.Count == 0 ? null : string.Join("; ", skipped.Select(s => $"{s.EmployeeName}: {s.Reason}"));
+    }, "Recalculated from the latest contracts, attendance and leave.");
+
+    private Task Approve() => Do(a => Payroll.Approve(Id, a), "Payroll approved and posted to the books.");
+    private Task Pay() => Do(a => Payroll.Pay(Id, _payDate, _payFrom, a), "Wages recorded as paid.");
+
+    private async Task Delete()
+    {
+        await Do(a => Payroll.DeleteDraft(Id, a), "");
+        if (!_isError) Navigation.NavigateTo("/hr/payroll");
+    }
+
+    private void StartAdjust(Payslip p)
+    {
+        _adjusting = p;
+        (_bonus, _other, _otherNote) = (p.Bonus, p.Result.OtherDeductions, p.OtherDeductionsNote);
+    }
+
+    private async Task SaveAdjust()
+    {
+        var p = _adjusting!;
+        _adjusting = null;
+        await Do(a => Payroll.Adjust(p.Id, _bonus, _other, _otherNote, a), $"{p.EmployeeName}'s payslip updated.");
+    }
+
+    // The list for paying staff: who, how, where and how much. Contains bank details, so handle it carefully.
+    private async Task BankSchedule()
+    {
+        if (_run is null) return;
+        var csv = new StringBuilder("employee_number,name,pay_method,account,net_pay\n");
+        foreach (var p in _run.Payslips)
+            csv.AppendLine(string.Join(",", Csv.Escape(p.EmployeeNumber), Csv.Escape(p.EmployeeName), p.PayMethod, Csv.Escape(p.PayAccount), Csv.Amount(p.Result.Net)));
+        csv.AppendLine($",,,Total,{Csv.Amount(_run.Net)}");
+        await JS.InvokeVoidAsync("wavePos.download", $"payroll-{_run.Period}-payments.csv", "text/csv", csv.ToString());
+    }
+}

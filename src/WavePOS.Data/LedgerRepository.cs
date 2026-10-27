@@ -358,6 +358,32 @@ public class LedgerRepository(PosDatabase db)
             exists.Parameters.AddWithValue("$k", a.Key);
             if ((long)exists.ExecuteScalar()! > 0) continue;
 
+            // An account already on the default code (e.g. "2200 PAYE & NAPSA payable" from an older
+            // chart) is taken over if it's the same type and either has the same name or nothing posted to it.
+            using (var same = conn.CreateCommand())
+            {
+                same.CommandText = """
+                    SELECT a.id, a.name, EXISTS (SELECT 1 FROM journal_lines l WHERE l.account_id = a.id)
+                    FROM accounts a WHERE a.code = $c AND a.system_key IS NULL AND a.type = $t;
+                    """;
+                same.Parameters.AddWithValue("$c", a.Code);
+                same.Parameters.AddWithValue("$t", a.Type.ToString());
+                using var r = same.ExecuteReader();
+                if (r.Read() && (string.Equals(r.GetString(1), a.Name, StringComparison.OrdinalIgnoreCase) || r.GetInt64(2) == 0))
+                {
+                    var id = r.GetInt64(0);
+                    r.Close();
+                    using var adopt = conn.CreateCommand();
+                    adopt.CommandText = "UPDATE accounts SET system_key = $k, name = $n, description = $d, is_active = 1 WHERE id = $id;";
+                    adopt.Parameters.AddWithValue("$k", a.Key);
+                    adopt.Parameters.AddWithValue("$n", a.Name);
+                    adopt.Parameters.AddWithValue("$d", a.Description);
+                    adopt.Parameters.AddWithValue("$id", id);
+                    adopt.ExecuteNonQuery();
+                    continue;
+                }
+            }
+
             var code = a.Code;
             for (var n = 1; ; n++)
             {

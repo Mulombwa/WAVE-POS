@@ -35,6 +35,16 @@ public enum Permission
     ManageSalesOrders,
     /// <summary>Set customer credit limits and confirm orders over a customer's limit.</summary>
     ManageCredit,
+    /// <summary>See the staff directory (names, jobs, departments, leave) without pay or personal details.</summary>
+    ViewEmployees,
+    /// <summary>Record daily attendance and overtime, and request leave for staff.</summary>
+    RecordAttendance,
+    /// <summary>Add and edit employees and contracts (with personal and pay details) and approve leave.</summary>
+    ManageEmployees,
+    /// <summary>Prepare the monthly payroll and see payslips.</summary>
+    RunPayroll,
+    /// <summary>Approve payroll (posts it to the books) and change statutory rates.</summary>
+    ApprovePayroll,
 }
 
 /// <summary>Who may do what. One place to change it, used by both the desktop and web apps.</summary>
@@ -51,6 +61,7 @@ public static class Permissions
         [
             .. cashier, Permission.ManageCustomers, Permission.ProcessReturns, Permission.AdjustStock,
             Permission.ViewPurchasing, Permission.ManagePurchasing, Permission.ViewSalesOrders, Permission.ManageSalesOrders,
+            Permission.ViewEmployees, Permission.RecordAttendance,
         ];
         HashSet<Permission> manager = [.. Enum.GetValues<Permission>()];
         // Accountants and bookkeepers keep the books (bills, invoices, payments) but don't ring up sales,
@@ -58,7 +69,7 @@ public static class Permissions
         HashSet<Permission> accountant =
         [
             Permission.ViewAccounts, Permission.ManageAccounts, Permission.ViewAuditLog, Permission.ViewInventory, Permission.ViewCustomers,
-            Permission.ViewPurchasing, Permission.ViewSalesOrders,
+            Permission.ViewPurchasing, Permission.ViewSalesOrders, Permission.ViewEmployees, Permission.RunPayroll,
         ];
 
         return new()

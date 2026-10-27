@@ -105,12 +105,34 @@ WAVE POS is growing into an ERP. Buying and selling on account sit alongside the
 
 Printed invoices are titled *Invoice*. ZRA requires VAT-registered businesses to issue tax invoices through **ZRA Smart Invoice**; connecting to it is on the roadmap.
 
+## HR & payroll (web portal)
+
+Under **HR & payroll**.
+
+- **Employees**: job, department, contact details, NRC, TPIN, NAPSA and NHIMA numbers, and how they're paid (bank, mobile money or cash). Personal and pay details are only shown to HR and payroll staff; every time someone opens a record it's written to the audit trail, and the audit trail records which fields changed, never the personal values.
+- **Contracts**: permanent, fixed-term or casual, with basic pay, housing, transport and other allowances, normal hours and annual leave (at least 24 days a year, per the Employment Code Act 2019). A new contract (a pay rise or renewal) ends the previous one. Contracts ending within 30 days are flagged.
+- **Leave**: annual, sick, maternity, paternity, compassionate, family responsibility and unpaid. Annual leave builds up at 2 days per completed month and can't be over-booked; overlapping requests are refused; a manager approves or turns down (with a reason). Weekends aren't counted; public holidays aren't taken off yet.
+- **Attendance**: a daily register (present, late, absent, on leave, day off) with hours and overtime. Approved leave is filled in automatically.
+- **Payroll**, one run per month:
+  1. *Prepare*: worked out for everyone with a contract that month, pro rata for people who joined or left part-way. Overtime is paid at 1.5 × the hourly rate (basic × 12 ÷ (52 × weekly hours)); unpaid leave and absences not covered by leave are deducted at basic ÷ working days in the month.
+  2. *Adjust* while in draft: bonuses, and deductions after tax such as salary advance recovery. *Recalculate* picks up late attendance, leave or contract changes and keeps the adjustments.
+  3. *Approve*: by a manager other than whoever prepared it (unless they're the only one, which is flagged). Posts to the books, dated the last day of the month: gross pay and the employer's NAPSA, NHIMA and skills levy as costs; PAYE, NAPSA, NHIMA and skills levy payable; advances recovered; and net wages payable.
+  4. *Pay*: records net pay out of the bank, cash or mobile money. It then shows up for matching on the bank reconciliation page.
+- **Payslips** (A4, print or PDF, one per page for the whole payroll), a CSV list for making the payments, and a summary of PAYE, NAPSA, NHIMA and skills levy due by the 10th of the next month.
+- **Statutory rates** are kept as dated tables. Built in: PAYE 0% up to K5,100 a month, 20% to K7,100, 30% to K9,200 and 37% above; NAPSA 5% + 5% up to an earnings ceiling of K34,164 a month (2025) and K37,236 (from January 2026); NHIMA 1% + 1% of basic pay; skills development levy 0.5% of gross (employer). Whether NHIMA is on basic or gross pay, and whether employee NAPSA is taken off before PAYE, are settings. **Check these figures against the latest ZRA practice note and NAPSA notice before running a real payroll**, and add a new table whenever they change.
+
+| Role | HR & payroll |
+| --- | --- |
+| Supervisor | Staff directory, attendance register, request leave |
+| Accountant / bookkeeper | Staff directory, prepare payroll, payslips, record wages paid |
+| Manager | Everything, including employee records and contracts, approving leave and payroll, and changing rates |
+
 ## Roadmap
 
 1. ✅ Retail core: staff & roles, audit trail, inventory & variants, customers, returns.
 2. ✅ Accounting: chart of accounts, double-entry books from sales/refunds/stock, accountant & bookkeeper views, bank statement import and reconciliation.
 3. ✅ Supply chain & orders: suppliers, purchase orders with approvals, goods received, supplier bills and payments; quotes, sales orders with credit control, deliveries, invoices and customer payments.
-4. HR & payroll: employee records, contracts, leave and attendance, Zambian payroll (PAYE, NAPSA, NHIMA), payslips, posted to the books.
+4. ✅ HR & payroll: employee records, contracts, leave and attendance, Zambian payroll (PAYE, NAPSA, NHIMA, skills levy), payslips, posted to the books. Next for HR: public holidays, employee self-service, statutory return files (ZRA PAYE, NAPSA and NHIMA schedules).
 5. Central server sync: desktop tills share the web portal's data and work offline.
 6. Integrations & platform: ZRA Smart Invoice, a REST API, modules that can be switched on or off, encryption of sensitive fields and security monitoring.
 7. Reports & analytics: sales by day/product/staff/customer, margins, seasonal trends, stock turnover.

@@ -1,0 +1,73 @@
+@page "/hr/payroll"
+@attribute [Authorize(Policy = nameof(Permission.RunPayroll))]
+@rendermode InteractiveServer
+@inject PayrollRepository Payroll
+@inject NavigationManager Navigation
+
+<PageTitle>Payroll · WAVE POS</PageTitle>
+
+<div class="page">
+    <HrNav Role="_role" />
+    <h1>Payroll</h1>
+    <p class="muted">
+        Each month: prepare the payroll (worked out from contracts, overtime and unpaid days), check it and add bonuses or advance
+        recoveries, then a manager approves it, which posts it to the books, and finally record the wages as paid.
+        PAYE, NAPSA, NHIMA and the skills levy are due by the 10th of the following month.
+    </p>
+
+    <section class="card lookup">
+        <label class="field"><span>Month</span><input type="month" value="@_month" @onchange="e => _month = e.Value?.ToString() ?? _month" /></label>
+        <button type="button" class="btn primary" @onclick="Prepare">Prepare payroll</button>
+        @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+    </section>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>Month</th><th>Status</th><th class="num">Employees</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Net pay</th><th class="num">Cost to business</th><th>Prepared by</th></tr></thead>
+            <tbody>
+                @foreach (var r in _runs)
+                {
+                    <tr>
+                        <td><a href="/hr/payroll/@r.Id">@r.Title</a></td>
+                        <td><span class="badge @(r.Status switch { PayrollStatus.Draft => "warn", PayrollStatus.Approved => "info", _ => "ok" })">@r.Status</span></td>
+                        <td class="num">@r.Payslips.Count</td>
+                        <td class="num">@Money.Format(r.Gross)</td>
+                        <td class="num">@Money.Format(r.Paye)</td>
+                        <td class="num">@Money.Format(r.Net)</td>
+                        <td class="num">@Money.Format(r.EmployerCost)</td>
+                        <td>@r.PreparedBy</td>
+                    </tr>
+                }
+                @if (_runs.Count == 0) { <tr><td colspan="8" class="muted empty">No payrolls yet.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private UserRole _role;
+    private List<PayrollRun> _runs = [];
+    private string _month = DateTime.Today.ToString("yyyy-MM");
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        _runs = Payroll.Runs();
+    }
+
+    private async Task Prepare()
+    {
+        _error = null;
+        if (_month.Length != 7 || !int.TryParse(_month[..4], out var y) || !int.TryParse(_month[5..], out var m)) { _error = "Choose a month."; return; }
+        try
+        {
+            var (id, skipped) = Payroll.CreateRun(y, m, (await AuthState).User.ToActor());
+            var note = skipped.Count == 0 ? "" : "?skipped=" + Uri.EscapeDataString(string.Join("; ", skipped.Select(s => $"{s.EmployeeName}: {s.Reason}")));
+            Navigation.NavigateTo($"/hr/payroll/{id}{note}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _error = ex.Message; }
+    }
+}

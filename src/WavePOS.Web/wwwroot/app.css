@@ -419,3 +419,16 @@ details.card[open] > summary { margin-bottom: .5rem; }
 .doc-a4 .signatures { display: flex; justify-content: space-between; gap: 32px; margin-top: 48px; }
 .topnav a { white-space: nowrap; }
 .topnav { flex-wrap: wrap; }
+
+/* ---------- HR & payroll ---------- */
+.payroll-table { font-size: .85rem; }
+.payroll-table td, .payroll-table th { padding: .45rem .5rem; }
+.small-strong { font-size: 1rem !important; }
+.totals-table.left { margin-left: 0; width: 100%; }
+.totals-table.left td:first-child { text-align: left; }
+details.sub-form { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .75rem; }
+details.sub-form > summary { cursor: pointer; font-weight: 600; color: var(--brand); margin-bottom: .5rem; }
+.payslip-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.doc-a4 .items .total-row td { font-weight: 600; border-top: 1px solid #9AA6BA; }
+.doc-a4.payslip { min-height: auto; }
+@media print { .doc-a4.payslip { page-break-after: always; } }

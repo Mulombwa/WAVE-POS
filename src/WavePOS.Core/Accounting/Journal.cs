@@ -18,6 +18,8 @@ public enum JournalSource
     Purchase,
     /// <summary>Deliveries, tax invoices and customer payments against a sales order.</summary>
     SalesOrder,
+    /// <summary>An approved payroll, or wages paid.</summary>
+    Payroll,
 }
 
 public static class JournalSources
@@ -32,6 +34,7 @@ public static class JournalSources
         JournalSource.Reversal => "Reversal",
         JournalSource.Purchase => "Purchasing",
         JournalSource.SalesOrder => "Sales order",
+        JournalSource.Payroll => "Payroll",
         _ => "Sale",
     };
 
@@ -41,7 +44,7 @@ public static class JournalSources
     /// </summary>
     public static bool IsAutomatic(this JournalSource source) =>
         source is JournalSource.Sale or JournalSource.Return or JournalSource.Stock
-            or JournalSource.Purchase or JournalSource.SalesOrder;
+            or JournalSource.Purchase or JournalSource.SalesOrder or JournalSource.Payroll;
 
     /// <summary>Where to undo an automatic entry, for messages.</summary>
     public static string UndoHint(this JournalSource source) => source switch
@@ -49,6 +52,7 @@ public static class JournalSources
         JournalSource.Stock => "This entry came from a stock change. Adjust the stock instead.",
         JournalSource.Purchase => "This entry came from purchasing (goods received, a supplier bill or payment), so it can't be reversed here.",
         JournalSource.SalesOrder => "This entry came from a sales order (delivery, invoice or payment), so it can't be reversed here.",
+        JournalSource.Payroll => "This entry came from payroll, so it can't be reversed here. Correct it in next month's payroll.",
         _ => "This entry came from the till. Process a refund instead.",
     };
 }

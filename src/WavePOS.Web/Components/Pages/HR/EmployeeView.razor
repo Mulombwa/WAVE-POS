@@ -1,0 +1,222 @@
+@page "/hr/employees/{Id:long}"
+@attribute [Authorize(Policy = nameof(Permission.ViewEmployees))]
+@rendermode InteractiveServer
+@inject HrRepository Hr
+@inject PayrollRepository Payroll
+
+<PageTitle>@(_e?.Name ?? "Employee") · WAVE POS</PageTitle>
+
+<div class="page">
+    <HrNav Role="_role" />
+    @if (_e is null)
+    {
+        <h1>Employee not found</h1>
+        <a href="/hr">Back to employees</a>
+    }
+    else
+    {
+        <div class="page-head">
+            <div>
+                <h1>@_e.Name</h1>
+                <span class="muted"><span class="mono">@_e.Number</span> · @_e.JobTitle@(_e.Department.Length > 0 ? $", {_e.Department}" : "")</span>
+                @if (_e.Status == EmployeeStatus.Left) { <span class="badge">Left @_e.LeftDate?.ToString("dd MMM yyyy")</span> }
+            </div>
+            @if (_canManage) { <a class="btn outline" href="/hr/employees/@_e.Id/edit">Edit details</a> }
+        </div>
+
+        @if (IsNew && _current is null && _canManage)
+        {
+            <div class="alert warn" role="status">Employee added. Add their contract below so they're included in payroll.</div>
+        }
+        @if (_message is not null) { <div class="alert @(_isError ? "error" : "success")" role="status">@_message</div> }
+
+        <div class="stat-grid">
+            <div class="stat"><span>Started</span><strong>@_e.HireDate.ToString("dd MMM yyyy")</strong></div>
+            <div class="stat"><span>Annual leave available</span><strong>@_leaveBalance.ToString("0.#") days</strong></div>
+            @if (_canSeePay)
+            {
+                <div class="stat"><span>Monthly pay (contract)</span><strong>@(_current is null ? "—" : Money.Format(_current.MonthlyPay))</strong></div>
+            }
+            <div class="stat @(_current is null ? "danger" : "")"><span>Contract</span><strong>@(_current is null ? "None" : _current.Type.Label())</strong></div>
+        </div>
+
+        @if (_canSeePay)
+        {
+            <section class="card">
+                <h2>Personal &amp; payment details</h2>
+                <dl class="facts">
+                    <dt>Phone / email</dt><dd>@_e.Phone @_e.Email</dd>
+                    <dt>Address</dt><dd>@_e.Address</dd>
+                    <dt>Date of birth</dt><dd>@_e.DateOfBirth?.ToString("dd MMM yyyy")</dd>
+                    <dt>NRC</dt><dd class="mono">@_e.Nrc</dd>
+                    <dt>TPIN</dt><dd class="mono">@_e.Tpin</dd>
+                    <dt>NAPSA / NHIMA</dt><dd class="mono">@_e.NapsaNumber @(_e.NhimaNumber.Length > 0 ? $"/ {_e.NhimaNumber}" : "")</dd>
+                    <dt>Paid by</dt>
+                    <dd>@(_e.PayMethod switch { PayMethod.Bank => $"Bank: {_e.BankName} {_e.BankBranch} {_e.BankAccount}", PayMethod.MobileMoney => $"Mobile money: {_e.MobileMoneyNumber}", _ => "Cash" })</dd>
+                    @if (_e.Notes.Length > 0) { <dt>Notes</dt><dd>@_e.Notes</dd> }
+                </dl>
+                <p class="muted small">Opening this record was written to the audit trail.</p>
+            </section>
+
+            <section class="card">
+                <h2>Contracts</h2>
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>Type</th><th>From</th><th>To</th><th class="num">Basic</th><th class="num">Allowances</th><th class="num">Hours/week</th><th class="num">Leave/year</th></tr></thead>
+                        <tbody>
+                            @foreach (var c in _contracts.AsEnumerable().Reverse())
+                            {
+                                <tr class="@(c == _current ? "" : "inactive")">
+                                    <td>@c.Type.Label() @if (c == _current) { <span class="badge ok">Current</span> }</td>
+                                    <td class="nowrap">@c.StartDate.ToString("dd MMM yyyy")</td>
+                                    <td class="nowrap">@(c.EndDate?.ToString("dd MMM yyyy") ?? "Open-ended")</td>
+                                    <td class="num">@Money.Format(c.BasicPay)</td>
+                                    <td class="num">@Money.Format(c.Allowances)</td>
+                                    <td class="num">@c.HoursPerWeek.ToString("0.#")</td>
+                                    <td class="num">@c.LeaveDaysPerYear.ToString("0.#")</td>
+                                </tr>
+                            }
+                            @if (_contracts.Count == 0) { <tr><td colspan="7" class="muted empty">No contract yet.</td></tr> }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (_canManage && _e.Status == EmployeeStatus.Active)
+                {
+                    <details class="sub-form" open="@(_contracts.Count == 0)">
+                        <summary>@(_contracts.Count == 0 ? "Add their contract" : "New contract (pay rise, renewal or change of terms)")</summary>
+                        <div class="three-col">
+                            <label class="field">
+                                <span>Type</span>
+                                <select @bind="_new.Type">@foreach (var t in Enum.GetValues<ContractType>()) { <option value="@t">@t.Label()</option> }</select>
+                            </label>
+                            <label class="field"><span>Starts</span><input type="date" @bind="_new.StartDate" /></label>
+                            <label class="field"><span>Ends @(_new.Type == ContractType.FixedTerm ? "" : "(optional)")</span><input type="date" @bind="_new.EndDate" /></label>
+                            <label class="field"><span>Basic pay a month (K)</span><input type="number" min="0" step="0.01" @bind="_new.BasicPay" /></label>
+                            <label class="field"><span>Housing allowance (K)</span><input type="number" min="0" step="0.01" @bind="_new.HousingAllowance" /></label>
+                            <label class="field"><span>Transport allowance (K)</span><input type="number" min="0" step="0.01" @bind="_new.TransportAllowance" /></label>
+                            <label class="field"><span>Other allowances (K)</span><input type="number" min="0" step="0.01" @bind="_new.OtherAllowance" /></label>
+                            <label class="field"><span>Normal hours a week</span><input type="number" min="1" max="72" @bind="_new.HoursPerWeek" /></label>
+                            <label class="field"><span>Annual leave days a year (min. 24)</span><input type="number" min="24" @bind="_new.LeaveDaysPerYear" /></label>
+                        </div>
+                        <p class="muted small">Allowances are taxable and count towards NAPSA. A new contract ends the current one the day before it starts.</p>
+                        <button type="button" class="btn primary" @onclick="AddContract">Save contract</button>
+                    </details>
+                }
+            </section>
+        }
+
+        <section class="card">
+            <div class="page-head">
+                <h2>Leave</h2>
+                @if (_role.Can(Permission.RecordAttendance)) { <a class="btn small outline" href="/hr/leave?employee=@_e.Id">Request leave</a> }
+            </div>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Type</th><th>Dates</th><th class="num">Days</th><th>Status</th><th>Reason</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _leave)
+                        {
+                            <tr class="@(r.Status is LeaveStatus.Rejected or LeaveStatus.Cancelled ? "inactive" : "")">
+                                <td>@r.Type.Label()</td>
+                                <td class="nowrap">@r.Start.ToString("dd MMM") – @r.End.ToString("dd MMM yyyy")</td>
+                                <td class="num">@r.Days.ToString("0.#")</td>
+                                <td><LeaveBadge Status="r.Status" /></td>
+                                <td>@r.Reason</td>
+                            </tr>
+                        }
+                        @if (_leave.Count == 0) { <tr><td colspan="5" class="muted empty">No leave yet.</td></tr> }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        @if (_canSeePay && _payslips.Count > 0)
+        {
+            <section class="card">
+                <h2>Payslips</h2>
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>Month</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Net pay</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var p in _payslips)
+                            {
+                                <tr>
+                                    <td>@p.Period</td>
+                                    <td class="num">@Money.Format(p.Result.Gross)</td>
+                                    <td class="num">@Money.Format(p.Result.Paye)</td>
+                                    <td class="num">@Money.Format(p.Result.Net)</td>
+                                    <td><a href="/print/payslip/@p.Id" target="_blank" rel="noopener">Payslip</a></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public long Id { get; set; }
+    [SupplyParameterFromQuery(Name = "new")] public int? NewQuery { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private UserRole _role;
+    private bool _canManage, _canSeePay;
+    private Employee? _e;
+    private List<Contract> _contracts = [];
+    private Contract? _current;
+    private List<LeaveRequest> _leave = [];
+    private List<Payslip> _payslips = [];
+    private decimal _leaveBalance;
+    private Contract _new = new();
+    private string? _message;
+    private bool _isError;
+    private WavePOS.Core.Audit.Actor _actor = WavePOS.Core.Audit.Actor.System;
+
+    private bool IsNew => NewQuery == 1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var user = (await AuthState).User;
+        _role = user.ToUser().Role;
+        _actor = user.ToActor();
+        _canManage = _role.Can(Permission.ManageEmployees);
+        _canSeePay = _canManage || _role.Can(Permission.RunPayroll);
+        Load();
+        if (_e is not null && _canSeePay) Hr.LogViewed(Id, _actor); // personal and pay details were shown
+    }
+
+    private void Load()
+    {
+        _e = Hr.GetEmployee(Id);
+        if (_e is null) return;
+        _contracts = Hr.Contracts(Id);
+        _current = _contracts.FirstOrDefault(c => c.CoversDay(Today)) ?? _contracts.LastOrDefault(c => c.StartDate > Today);
+        _leave = Hr.LeaveRequests(employeeId: Id);
+        _leaveBalance = Hr.AnnualLeaveBalance(Id, Today);
+        _payslips = _canSeePay ? Payroll.PayslipsFor(Id) : [];
+        var start = _contracts.Count == 0 ? _e.HireDate : (Today > _contracts[^1].StartDate ? Today : _contracts[^1].StartDate.AddDays(1));
+        _new = new Contract
+        {
+            EmployeeId = Id, StartDate = start, Type = _current?.Type ?? ContractType.Permanent,
+            BasicPay = _current?.BasicPay ?? 0, HousingAllowance = _current?.HousingAllowance ?? 0,
+            TransportAllowance = _current?.TransportAllowance ?? 0, OtherAllowance = _current?.OtherAllowance ?? 0,
+            HoursPerWeek = _current?.HoursPerWeek ?? 45, LeaveDaysPerYear = _current?.LeaveDaysPerYear ?? 24,
+        };
+    }
+
+    private void AddContract()
+    {
+        _message = null;
+        try
+        {
+            Hr.AddContract(_new, _actor);
+            (_message, _isError) = ("Contract saved.", false);
+            Load();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { (_message, _isError) = (ex.Message, true); }
+    }
+}

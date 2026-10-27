@@ -1,0 +1,6 @@
+@* Coloured label for a leave request's status. *@
+<span class="badge @(Status switch { LeaveStatus.Pending => "warn", LeaveStatus.Approved => "ok", LeaveStatus.Rejected => "danger", _ => "" })">@Status</span>
+
+@code {
+    [Parameter] public LeaveStatus Status { get; set; }
+}

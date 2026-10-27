@@ -1,0 +1,113 @@
+@page "/hr/employees/new"
+@page "/hr/employees/{Id:long}/edit"
+@attribute [Authorize(Policy = nameof(Permission.ManageEmployees))]
+@rendermode InteractiveServer
+@inject HrRepository Hr
+@inject NavigationManager Navigation
+
+<PageTitle>@(Id is null ? "Add employee" : "Edit employee") · WAVE POS</PageTitle>
+
+<div class="page">
+    <HrNav Role="_role" />
+    <h1>@(Id is null ? "Add employee" : $"Edit {_e.Name}")</h1>
+
+    <section class="card">
+        @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+
+        <h2 class="sub">Job</h2>
+        <div class="three-col">
+            <label class="field"><span>First name</span><input @bind="_e.FirstName" /></label>
+            <label class="field"><span>Last name</span><input @bind="_e.LastName" /></label>
+            <label class="field"><span>Date of birth</span><input type="date" @bind="_e.DateOfBirth" /></label>
+            <label class="field"><span>Job title</span><input @bind="_e.JobTitle" /></label>
+            <label class="field"><span>Department</span><input @bind="_e.Department" /></label>
+            <label class="field"><span>Hire date</span><input type="date" @bind="_e.HireDate" /></label>
+        </div>
+
+        <h2 class="sub">Contact</h2>
+        <div class="three-col">
+            <label class="field"><span>Phone</span><input type="tel" @bind="_e.Phone" /></label>
+            <label class="field"><span>Email</span><input type="email" @bind="_e.Email" /></label>
+            <label class="field"><span>Address</span><input @bind="_e.Address" /></label>
+        </div>
+
+        <h2 class="sub">Statutory numbers</h2>
+        <div class="three-col">
+            <label class="field"><span>NRC number</span><input @bind="_e.Nrc" placeholder="123456/10/1" /></label>
+            <label class="field"><span>ZRA TPIN</span><input @bind="_e.Tpin" inputmode="numeric" maxlength="10" /></label>
+            <label class="field"><span>NAPSA number</span><input @bind="_e.NapsaNumber" /></label>
+            <label class="field"><span>NHIMA number</span><input @bind="_e.NhimaNumber" /></label>
+        </div>
+
+        <h2 class="sub">How they're paid</h2>
+        <div class="three-col">
+            <label class="field">
+                <span>Pay by</span>
+                <select @bind="_e.PayMethod">
+                    <option value="@PayMethod.Bank">Bank transfer</option>
+                    <option value="@PayMethod.MobileMoney">Mobile money</option>
+                    <option value="@PayMethod.Cash">Cash</option>
+                </select>
+            </label>
+            @if (_e.PayMethod == PayMethod.Bank)
+            {
+                <label class="field"><span>Bank</span><input @bind="_e.BankName" placeholder="e.g. Zanaco" /></label>
+                <label class="field"><span>Branch</span><input @bind="_e.BankBranch" /></label>
+                <label class="field"><span>Account number</span><input @bind="_e.BankAccount" /></label>
+            }
+            else if (_e.PayMethod == PayMethod.MobileMoney)
+            {
+                <label class="field"><span>Mobile money number</span><input type="tel" @bind="_e.MobileMoneyNumber" /></label>
+            }
+        </div>
+
+        <label class="field"><span>Notes</span><input @bind="_e.Notes" /></label>
+
+        @if (Id is not null)
+        {
+            <h2 class="sub">Employment status</h2>
+            <div class="three-col">
+                <label class="field">
+                    <span>Status</span>
+                    <select @bind="_e.Status"><option value="@EmployeeStatus.Active">Working here</option><option value="@EmployeeStatus.Left">Has left</option></select>
+                </label>
+                @if (_e.Status == EmployeeStatus.Left) { <label class="field"><span>Last day</span><input type="date" @bind="_e.LeftDate" /></label> }
+            </div>
+        }
+
+        <p class="privacy-note small">
+            These are personal details under the Data Protection Act 2021. Only HR and payroll staff can see them, and every
+            time someone opens this record it's written to the audit trail.
+        </p>
+        <div class="actions-row">
+            <a class="btn outline" href="@(Id is null ? "/hr" : $"/hr/employees/{Id}")">Cancel</a>
+            <button type="button" class="btn primary" @onclick="Save">@(Id is null ? "Add employee" : "Save")</button>
+        </div>
+    </section>
+</div>
+
+@code {
+    [Parameter] public long? Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private Employee _e = new() { HireDate = DateOnly.FromDateTime(DateTime.Today) };
+    private UserRole _role;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        if (Id is { } id && Hr.GetEmployee(id) is { } e) _e = e;
+    }
+
+    private async Task Save()
+    {
+        _error = null;
+        try
+        {
+            var id = Hr.SaveEmployee(_e, (await AuthState).User.ToActor());
+            Navigation.NavigateTo(Id is null ? $"/hr/employees/{id}?new=1" : $"/hr/employees/{id}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _error = ex.Message; }
+    }
+}

@@ -1,0 +1,171 @@
+@page "/hr/leave"
+@attribute [Authorize(Policy = nameof(Permission.ViewEmployees))]
+@rendermode InteractiveServer
+@inject HrRepository Hr
+
+<PageTitle>Leave · WAVE POS</PageTitle>
+
+<div class="page">
+    <HrNav Role="_role" />
+    <h1>Leave</h1>
+    @if (_message is not null) { <div class="alert @(_isError ? "error" : "success")" role="status">@_message</div> }
+
+    @if (_role.Can(Permission.RecordAttendance))
+    {
+        <section class="card">
+            <h2>Request leave</h2>
+            <div class="three-col">
+                <label class="field">
+                    <span>Employee</span>
+                    <select @bind="EmployeeId">
+                        <option value="0">Choose…</option>
+                        @foreach (var e in _employees) { <option value="@e.Id">@e.Name</option> }
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Type</span>
+                    <select @bind="_type">@foreach (var t in Enum.GetValues<LeaveType>()) { <option value="@t">@t.Label()</option> }</select>
+                </label>
+                <label class="field"><span>Reason (optional)</span><input @bind="_reason" /></label>
+                <label class="field"><span>From</span><input type="date" @bind="_from" /></label>
+                <label class="field"><span>To (inclusive)</span><input type="date" @bind="_to" /></label>
+                <div class="field">
+                    <span>Working days</span>
+                    <strong>@(_to >= _from ? HrRules.WorkingDays(_from, _to) : 0)</strong>
+                    @if (_employeeId != 0) { <span class="muted"> · annual leave available: @_balance.ToString("0.#")</span> }
+                </div>
+            </div>
+            <p class="muted small">@_type.Label(): @_type.Entitlement(). Weekends aren't counted; public holidays aren't taken off yet.</p>
+            <button type="button" class="btn primary" disabled="@(_employeeId == 0)" @onclick="Request">Submit request</button>
+        </section>
+    }
+
+    <section class="card">
+        <h2>Waiting for approval</h2>
+        <div class="table-wrap">
+            <table class="data">
+                <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>Reason</th><th>Asked by</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in _pending)
+                    {
+                        <tr>
+                            <td><a href="/hr/employees/@r.EmployeeId">@r.EmployeeName</a></td>
+                            <td>@r.Type.Label()</td>
+                            <td class="nowrap">@r.Start.ToString("ddd dd MMM") – @r.End.ToString("ddd dd MMM yyyy")</td>
+                            <td class="num">@r.Days.ToString("0.#")</td>
+                            <td>@r.Reason</td>
+                            <td>@r.RequestedBy</td>
+                            <td class="row-actions">
+                                @if (_role.Can(Permission.ManageEmployees))
+                                {
+                                    <button type="button" class="btn small primary" @onclick='() => Decide(r, LeaveStatus.Approved, "")'>Approve</button>
+                                    <button type="button" class="btn small outline" @onclick="() => _rejecting = r">Turn down</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    @if (_pending.Count == 0) { <tr><td colspan="7" class="muted empty">Nothing waiting.</td></tr> }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Approved leave from today</h2>
+        <div class="table-wrap">
+            <table class="data">
+                <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>Approved by</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in _upcoming)
+                    {
+                        <tr>
+                            <td><a href="/hr/employees/@r.EmployeeId">@r.EmployeeName</a></td>
+                            <td>@r.Type.Label()</td>
+                            <td class="nowrap">@r.Start.ToString("ddd dd MMM") – @r.End.ToString("ddd dd MMM yyyy")</td>
+                            <td class="num">@r.Days.ToString("0.#")</td>
+                            <td>@r.DecidedBy</td>
+                            <td>@if (_role.Can(Permission.ManageEmployees)) { <button type="button" class="btn small outline" @onclick='() => Decide(r, LeaveStatus.Cancelled, "Cancelled")'>Cancel</button> }</td>
+                        </tr>
+                    }
+                    @if (_upcoming.Count == 0) { <tr><td colspan="6" class="muted empty">No approved leave coming up.</td></tr> }
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+@if (_rejecting is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _rejecting = null"></div>
+    <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="reject-title">
+        <h2 id="reject-title">Turn down leave for @_rejecting.EmployeeName?</h2>
+        <label class="field"><span>Reason</span><input @bind="_rejectNote" @bind:event="oninput" /></label>
+        <div class="modal-actions">
+            <button type="button" class="btn outline" @onclick="() => _rejecting = null">Back</button>
+            <button type="button" class="btn danger-solid" disabled="@string.IsNullOrWhiteSpace(_rejectNote)" @onclick="Reject">Turn down</button>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "employee")] public long? EmployeeQuery { get; set; }
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private UserRole _role;
+    private List<Employee> _employees = [];
+    private List<LeaveRequest> _pending = [], _upcoming = [];
+    private long _employeeId;
+    private LeaveType _type = LeaveType.Annual;
+    private DateOnly _from = Today.AddDays(1), _to = Today.AddDays(1);
+    private string _reason = "", _rejectNote = "";
+    private decimal _balance;
+    private LeaveRequest? _rejecting;
+    private string? _message;
+    private bool _isError;
+
+    private long EmployeeId
+    {
+        get => _employeeId;
+        set { _employeeId = value; _balance = value == 0 ? 0 : Hr.AnnualLeaveBalance(value, Today); }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        _employees = Hr.Employees();
+        if (EmployeeQuery is { } id && _employees.Any(e => e.Id == id)) EmployeeId = id;
+        Load();
+    }
+
+    private void Load()
+    {
+        _pending = Hr.LeaveRequests(LeaveStatus.Pending).OrderBy(r => r.Start).ToList();
+        _upcoming = Hr.LeaveRequests(LeaveStatus.Approved).Where(r => r.End >= Today).OrderBy(r => r.Start).ToList();
+    }
+
+    private async Task Act(Action<WavePOS.Core.Audit.Actor> action, string done)
+    {
+        try
+        {
+            action((await AuthState).User.ToActor());
+            (_message, _isError) = (done, false);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { (_message, _isError) = (ex.Message, true); }
+        Load();
+        if (_employeeId != 0) EmployeeId = _employeeId;
+    }
+
+    private Task Request() => Act(a => Hr.RequestLeave(_employeeId, _type, _from, _to, _reason, a), "Leave requested. A manager needs to approve it.");
+
+    private Task Decide(LeaveRequest r, LeaveStatus decision, string note) =>
+        Act(a => Hr.DecideLeave(r.Id, decision, note, a), $"{r.EmployeeName}'s leave {decision.ToString().ToLowerInvariant()}.");
+
+    private async Task Reject()
+    {
+        var r = _rejecting!;
+        _rejecting = null;
+        await Decide(r, LeaveStatus.Rejected, _rejectNote);
+        _rejectNote = "";
+    }
+}

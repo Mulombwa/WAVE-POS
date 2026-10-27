@@ -130,6 +130,7 @@ public class PosDatabase
         CreateRetailTables(conn);
         CreateAccountingTables(conn);
         CreateOrderTables(conn);
+        CreateHrTables(conn);
         AddColumnIfMissing(conn, "customers", "tpin", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(conn, "customers", "credit_limit_ngwee", "INTEGER");
         AddColumnIfMissing(conn, "customers", "payment_terms_days", "INTEGER NOT NULL DEFAULT 0");
@@ -502,6 +503,145 @@ public class PosDatabase
                 journal_entry_id  INTEGER REFERENCES journal_entries(id),
                 user_name         TEXT    NOT NULL,
                 created_at        TEXT    NOT NULL
+            );
+            """;
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>HR and payroll: employees, contracts, leave, attendance, statutory rates, payroll runs and payslips.</summary>
+    private static void CreateHrTables(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS employees (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                number              TEXT    UNIQUE,
+                first_name          TEXT    NOT NULL,
+                last_name           TEXT    NOT NULL,
+                job_title           TEXT    NOT NULL DEFAULT '',
+                department          TEXT    NOT NULL DEFAULT '',
+                phone               TEXT    NOT NULL DEFAULT '',
+                email               TEXT    NOT NULL DEFAULT '',
+                address             TEXT    NOT NULL DEFAULT '',
+                date_of_birth       TEXT,
+                hire_date           TEXT    NOT NULL,
+                left_date           TEXT,
+                status              TEXT    NOT NULL DEFAULT 'Active',
+                nrc                 TEXT    NOT NULL DEFAULT '',
+                tpin                TEXT    NOT NULL DEFAULT '',
+                napsa_number        TEXT    NOT NULL DEFAULT '',
+                nhima_number        TEXT    NOT NULL DEFAULT '',
+                pay_method          TEXT    NOT NULL DEFAULT 'Bank',
+                bank_name           TEXT    NOT NULL DEFAULT '',
+                bank_branch         TEXT    NOT NULL DEFAULT '',
+                bank_account        TEXT    NOT NULL DEFAULT '',
+                mobile_money_number TEXT    NOT NULL DEFAULT '',
+                notes               TEXT    NOT NULL DEFAULT '',
+                created_at          TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS employment_contracts (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id           INTEGER NOT NULL REFERENCES employees(id),
+                type                  TEXT    NOT NULL,
+                start_date            TEXT    NOT NULL,
+                end_date              TEXT,
+                basic_ngwee           INTEGER NOT NULL CHECK (basic_ngwee >= 0),
+                housing_ngwee         INTEGER NOT NULL DEFAULT 0,
+                transport_ngwee       INTEGER NOT NULL DEFAULT 0,
+                other_allowance_ngwee INTEGER NOT NULL DEFAULT 0,
+                hours_per_week        REAL    NOT NULL,
+                leave_days_per_year   REAL    NOT NULL,
+                notes                 TEXT    NOT NULL DEFAULT '',
+                created_by            TEXT    NOT NULL,
+                created_at            TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_contracts_employee ON employment_contracts(employee_id, start_date);
+
+            CREATE TABLE IF NOT EXISTS leave_requests (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id    INTEGER NOT NULL REFERENCES employees(id),
+                type           TEXT    NOT NULL,
+                start_date     TEXT    NOT NULL,
+                end_date       TEXT    NOT NULL,
+                days           REAL    NOT NULL,
+                reason         TEXT    NOT NULL DEFAULT '',
+                status         TEXT    NOT NULL DEFAULT 'Pending',
+                requested_by   TEXT    NOT NULL,
+                decided_by     TEXT,
+                decided_at     TEXT,
+                decision_note  TEXT    NOT NULL DEFAULT '',
+                created_at     TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_leave_employee ON leave_requests(employee_id, start_date);
+
+            CREATE TABLE IF NOT EXISTS attendance (
+                employee_id     INTEGER NOT NULL REFERENCES employees(id),
+                date            TEXT    NOT NULL,
+                status          TEXT    NOT NULL,
+                hours_worked    REAL    NOT NULL DEFAULT 0,
+                overtime_hours  REAL    NOT NULL DEFAULT 0,
+                note            TEXT    NOT NULL DEFAULT '',
+                recorded_by     TEXT    NOT NULL,
+                recorded_at     TEXT    NOT NULL,
+                PRIMARY KEY (employee_id, date)
+            );
+
+            CREATE TABLE IF NOT EXISTS payroll_rates (
+                effective_from  TEXT PRIMARY KEY,
+                rates_json      TEXT NOT NULL,
+                set_by          TEXT NOT NULL,
+                created_at      TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS payroll_runs (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                period              TEXT    NOT NULL UNIQUE,
+                status              TEXT    NOT NULL DEFAULT 'Draft',
+                rates_from          TEXT    NOT NULL,
+                prepared_by_id      INTEGER,
+                prepared_by         TEXT    NOT NULL,
+                approved_by         TEXT,
+                approved_at         TEXT,
+                journal_entry_id    INTEGER REFERENCES journal_entries(id),
+                paid_on             TEXT,
+                payment_entry_id    INTEGER REFERENCES journal_entries(id),
+                created_at          TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS payslips (
+                id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id                 INTEGER NOT NULL REFERENCES payroll_runs(id),
+                employee_id            INTEGER NOT NULL REFERENCES employees(id),
+                employee_number        TEXT    NOT NULL,
+                employee_name          TEXT    NOT NULL,
+                job_title              TEXT    NOT NULL,
+                department             TEXT    NOT NULL,
+                nrc                    TEXT    NOT NULL,
+                tpin                   TEXT    NOT NULL,
+                napsa_number           TEXT    NOT NULL,
+                pay_method             TEXT    NOT NULL,
+                pay_account            TEXT    NOT NULL,
+                basic_ngwee            INTEGER NOT NULL,
+                allowances_ngwee       INTEGER NOT NULL,
+                overtime_hours         REAL    NOT NULL,
+                overtime_ngwee         INTEGER NOT NULL,
+                bonus_ngwee            INTEGER NOT NULL DEFAULT 0,
+                unpaid_days            REAL    NOT NULL,
+                unpaid_ngwee           INTEGER NOT NULL,
+                other_deductions_ngwee INTEGER NOT NULL DEFAULT 0,
+                other_deductions_note  TEXT    NOT NULL DEFAULT '',
+                gross_ngwee            INTEGER NOT NULL,
+                taxable_ngwee          INTEGER NOT NULL,
+                paye_ngwee             INTEGER NOT NULL,
+                napsa_employee_ngwee   INTEGER NOT NULL,
+                napsa_employer_ngwee   INTEGER NOT NULL,
+                nhima_employee_ngwee   INTEGER NOT NULL,
+                nhima_employer_ngwee   INTEGER NOT NULL,
+                sdl_ngwee              INTEGER NOT NULL,
+                net_ngwee              INTEGER NOT NULL,
+                annual_leave_balance   REAL    NOT NULL DEFAULT 0,
+                UNIQUE (run_id, employee_id)
             );
             """;
         cmd.ExecuteNonQuery();
