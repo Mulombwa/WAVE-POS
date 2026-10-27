@@ -15,7 +15,7 @@ public class ProductRepository(PosDatabase db)
 {
     private const string SelectColumns = """
         SELECT id, sku, barcode, name, category, price_ngwee, vat_rate, stock_quantity,
-               cost_ngwee, reorder_level, is_active, family_id, option1, option2
+               cost_ngwee, reorder_level, is_active, family_id, option1, option2, image_file
         FROM products
         """;
 
@@ -249,6 +249,65 @@ public class ProductRepository(PosDatabase db)
         tx.Commit();
     }
 
+    /// <summary>Folder for product pictures, inside the business's own data folder.</summary>
+    public string ImageFolder => Path.Combine(db.DataDirectory, "products");
+
+    /// <summary>
+    /// Saves a product picture (already checked to be a PNG or JPEG) and removes the old one.
+    /// Every variant of the product gets the picture, unless <paramref name="thisVariantOnly"/>.
+    /// </summary>
+    public void SetImage(long productId, byte[] data, string extension, Actor actor, bool thisVariantOnly = false)
+    {
+        var product = GetById(productId) ?? throw new InvalidOperationException("Product not found.");
+        var targets = !thisVariantOnly && product.FamilyId is { } fam ? GetFamily(fam) : [product];
+        Directory.CreateDirectory(ImageFolder);
+        var file = $"{productId}-{Guid.NewGuid():N}{extension}";
+        File.WriteAllBytes(Path.Combine(ImageFolder, file), data);
+
+        using var conn = db.Open();
+        using var tx = conn.BeginTransaction();
+        foreach (var p in targets)
+            PurchasingRepository.Exec(conn, tx, "UPDATE products SET image_file = $f WHERE id = $id;", ("$f", file), ("$id", p.Id));
+        AuditRepository.Write(conn, tx, actor, AuditActions.ProductUpdated, "product", productId.ToString(CultureInfo.InvariantCulture),
+            $"{product.Name}: picture {(product.ImageFile is null ? "added" : "changed")}{(targets.Count > 1 ? $" for {targets.Count} variants" : "")}");
+        tx.Commit();
+        RemoveUnusedImages(targets.Select(t => t.ImageFile));
+    }
+
+    public void RemoveImage(long productId, Actor actor)
+    {
+        var product = GetById(productId) ?? throw new InvalidOperationException("Product not found.");
+        if (product.ImageFile is null) return;
+        using var conn = db.Open();
+        using var tx = conn.BeginTransaction();
+        PurchasingRepository.Exec(conn, tx, "UPDATE products SET image_file = NULL WHERE image_file = $f;", ("$f", product.ImageFile));
+        AuditRepository.Write(conn, tx, actor, AuditActions.ProductUpdated, "product", productId.ToString(CultureInfo.InvariantCulture),
+            $"{product.Name}: picture removed");
+        tx.Commit();
+        RemoveUnusedImages([product.ImageFile]);
+    }
+
+    /// <summary>The picture file for a product, or null. Only ever inside this business's folder.</summary>
+    public string? ImagePath(long productId)
+    {
+        if (GetById(productId)?.ImageFile is not { } file || file.Contains('/') || file.Contains('\\') || file.Contains("..")) return null;
+        var path = Path.Combine(ImageFolder, file);
+        return File.Exists(path) ? path : null;
+    }
+
+    private void RemoveUnusedImages(IEnumerable<string?> files)
+    {
+        using var conn = db.Open();
+        foreach (var f in files.OfType<string>().Distinct())
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT EXISTS (SELECT 1 FROM products WHERE image_file = $f);";
+            cmd.Parameters.AddWithValue("$f", f);
+            if ((long)cmd.ExecuteScalar()! == 0 && !f.Contains(".."))
+                try { File.Delete(Path.Combine(ImageFolder, f)); } catch (IOException) { }
+        }
+    }
+
     private static string UniqueSku(SqliteConnection conn, SqliteTransaction tx, string sku)
     {
         var candidate = sku;
@@ -294,6 +353,7 @@ public class ProductRepository(PosDatabase db)
                 FamilyId = r.IsDBNull(11) ? null : r.GetInt64(11),
                 Option1 = r.IsDBNull(12) ? null : r.GetString(12),
                 Option2 = r.IsDBNull(13) ? null : r.GetString(13),
+                ImageFile = r.IsDBNull(14) ? null : r.GetString(14),
             });
         }
         return list;

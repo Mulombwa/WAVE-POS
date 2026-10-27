@@ -23,9 +23,9 @@ public sealed class HrPayrollDataTests : IDisposable
         _payroll = new PayrollRepository(_db);
         _ledger = new LedgerRepository(_db);
         var users = new UserRepository(_db);
-        _ann = ActorFor(users.Create("ann", "Ann Phiri", "4321", UserRole.Manager));
-        _ben = ActorFor(users.Create("ben", "Ben Zulu", "4321", UserRole.Manager));
-        _sam = ActorFor(users.Create("sam", "Sam Mwale", "4321", UserRole.Supervisor));
+        _ann = ActorFor(users.Create("ann", "Ann Phiri", "4321", UserRole.Admin));
+        _ben = ActorFor(users.Create("ben", "Ben Zulu", "4321", UserRole.Admin));
+        _sam = ActorFor(users.Create("sam", "Sam Mwale", "4321", UserRole.OperationsManager));
     }
 
     private static Actor ActorFor(User u) => new(u.Id, u.DisplayName);
@@ -135,7 +135,7 @@ public sealed class HrPayrollDataTests : IDisposable
     [Fact]
     public void Only_the_manager_left_can_approve_their_own_payroll()
     {
-        new UserRepository(_db).Update(new User { Id = _ben.UserId!.Value, Username = "ben", DisplayName = "Ben Zulu", Role = UserRole.Manager, IsActive = false }, _ann);
+        new UserRepository(_db).Update(new User { Id = _ben.UserId!.Value, Username = "ben", DisplayName = "Ben Zulu", Role = UserRole.Admin, IsActive = false }, _ann);
         Hire("Grace", new(2026, 1, 1), 6000m);
         var (runId, _) = _payroll.CreateRun(2026, 9, _ann);
         _payroll.Approve(runId, _ann);

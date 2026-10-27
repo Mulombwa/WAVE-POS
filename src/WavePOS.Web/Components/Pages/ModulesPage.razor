@@ -1,0 +1,84 @@
+@page "/settings/modules"
+@attribute [Authorize(Policy = nameof(Permission.ManageModules))]
+@rendermode InteractiveServer
+@inject CurrentBusiness Current
+@inject BusinessRegistry Businesses
+@inject NavigationManager Navigation
+
+<PageTitle>Modules · WAVE POS</PageTitle>
+
+<div class="page">
+    <h1>Modules</h1>
+    <p class="muted">
+        Switch on only what your business uses; everything else disappears from the menus for all staff. Nothing is
+        deleted when you switch a module off: switch it back on and the data is still there.
+    </p>
+    @if (_message is not null) { <div class="alert @(_isError ? "error" : "success")" role="status">@_message</div> }
+
+    <section class="card">
+        <h2>Business size</h2>
+        <div class="chips">
+            @foreach (var size in Enum.GetValues<BusinessSize>())
+            {
+                <button type="button" class="chip @(_size == size ? "selected" : "")" @onclick="() => UsePreset(size)">@size.Label()</button>
+            }
+        </div>
+        <p class="muted small">Picking a size switches on its usual modules. You can then fine-tune below.</p>
+    </section>
+
+    <section class="card">
+        <h2>What's switched on</h2>
+        <div class="module-list">
+            @foreach (var m in Enum.GetValues<Module>())
+            {
+                var always = ModuleSet.AlwaysOn.Contains(m);
+                <label class="module-row @(_modules.Has(m) ? "on" : "")">
+                    <input type="checkbox" checked="@_modules.Has(m)" disabled="@always" @onchange="e => Toggle(m, e.Value is true)" />
+                    <span>
+                        <strong>@m.Label()</strong> @if (always) { <span class="badge">Always on</span> }
+                        <br /><span class="muted small">@m.Description()</span>
+                        @if (ModuleSet.Needs(m) is { Count: > 0 } needs) { <br /><span class="muted small">Needs: @string.Join(", ", needs.Select(n => n.Label()))</span> }
+                    </span>
+                </label>
+            }
+        </div>
+        <div class="actions-row">
+            <button type="button" class="btn primary" @onclick="Save">Save modules</button>
+        </div>
+    </section>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "saved")] public int? Saved { get; set; }
+
+    private BusinessSize _size;
+    private ModuleSet _modules = ModuleSet.All;
+    private string? _message;
+    private bool _isError;
+
+    protected override void OnInitialized()
+    {
+        if (Current.Business is { } b) (_size, _modules) = (b.Size, b.Modules);
+        if (Saved == 1) (_message, _isError) = ("Modules saved. The menus now show only what's switched on.", false);
+    }
+
+    private void UsePreset(BusinessSize size) => (_size, _modules) = (size, ModuleSet.ForSize(size));
+
+    private void Toggle(Module m, bool on)
+    {
+        _modules = _modules.With(m, on);
+        // Switching something on also switches on what it needs.
+        if (on) foreach (var needed in ModuleSet.Needs(m)) _modules = _modules.With(needed, true);
+    }
+
+    private async Task Save()
+    {
+        try
+        {
+            Businesses.SetModules(Current.Business!.Id, _size, _modules, (await AuthState).User.ToActor());
+            Navigation.NavigateTo("/settings/modules?saved=1", forceLoad: true); // reload so the menus update
+        }
+        catch (ArgumentException ex) { (_message, _isError) = (ex.Message, true); }
+    }
+}

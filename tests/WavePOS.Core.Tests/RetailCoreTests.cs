@@ -19,24 +19,29 @@ public class PermissionTests
     }
 
     [Fact]
-    public void Supervisor_can_refund_and_adjust_stock_but_not_manage_staff()
+    public void Operations_manager_runs_the_floor_but_not_staff_books_or_pay()
     {
-        Assert.True(UserRole.Supervisor.Can(Permission.ProcessReturns));
-        Assert.True(UserRole.Supervisor.Can(Permission.AdjustStock));
-        Assert.False(UserRole.Supervisor.Can(Permission.ManageStaff));
-        Assert.False(UserRole.Supervisor.Can(Permission.ViewAuditLog));
+        Assert.True(UserRole.OperationsManager.Can(Permission.ProcessReturns));
+        Assert.True(UserRole.OperationsManager.Can(Permission.AdjustStock));
+        Assert.True(UserRole.OperationsManager.Can(Permission.ApprovePurchases));
+        Assert.True(UserRole.OperationsManager.Can(Permission.ViewAuditLog));
+        Assert.False(UserRole.OperationsManager.Can(Permission.ManageStaff));
+        Assert.False(UserRole.OperationsManager.Can(Permission.ViewAccounts));
+        Assert.False(UserRole.OperationsManager.Can(Permission.ManageEmployees));
     }
 
     [Fact]
-    public void Manager_can_do_everything()
+    public void Super_admin_can_do_everything_and_admin_everything_but_modules()
     {
-        Assert.All(Enum.GetValues<Permission>(), p => Assert.True(UserRole.Manager.Can(p)));
+        Assert.All(Enum.GetValues<Permission>(), p => Assert.True(UserRole.SuperAdmin.Can(p)));
+        Assert.All(Enum.GetValues<Permission>().Where(p => p != Permission.ManageModules), p => Assert.True(UserRole.Admin.Can(p)));
+        Assert.False(UserRole.Admin.Can(Permission.ManageModules));
     }
 
     [Fact]
     public void Disabled_user_can_do_nothing()
     {
-        var user = new User { Role = UserRole.Manager, IsActive = false };
+        var user = new User { Role = UserRole.Admin, IsActive = false };
         Assert.False(user.Can(Permission.Sell));
     }
 }

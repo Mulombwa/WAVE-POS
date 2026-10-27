@@ -35,6 +35,27 @@
             <!-- Details -->
             <section class="card">
                 <h2>Details</h2>
+                <div class="product-picture">
+                    @if (_product.ImageFile is { } img)
+                    {
+                        <img src="/media/products/@_product.Id?v=@img" alt="Picture of @_product.Name" />
+                    }
+                    else
+                    {
+                        <div class="no-picture">No picture yet</div>
+                    }
+                    @if (_canEdit)
+                    {
+                        <div class="picture-actions">
+                            <label class="btn small file-btn">
+                                @(_product.ImageFile is null ? "Add a picture" : "Change picture")
+                                <InputFile OnChange="OnPicture" accept="image/png,image/jpeg" />
+                            </label>
+                            @if (_product.ImageFile is not null) { <button type="button" class="btn small outline" @onclick="RemovePicture">Remove</button> }
+                            <span class="muted small">PNG or JPG, up to 2 MB. @(_product.FamilyId is not null ? "Used for every size and colour." : "")</span>
+                        </div>
+                    }
+                </div>
                 <fieldset disabled="@(!_canEdit)">
                     <label class="field"><span>Name</span><input @bind="_edit.Name" /></label>
                     <div class="two-col">
@@ -192,6 +213,27 @@
         _family = _product.FamilyId is { } f ? Products.GetFamily(f) : [];
         _history = Inventory.History(Id);
     }
+
+    private async Task OnPicture(InputFileChangeEventArgs e)
+    {
+        if (e.File.Size > LogoUpload.MaxBytes) { (_message, _messageIsError) = ("That picture is over 2 MB. Choose a smaller one.", true); return; }
+        using var ms = new MemoryStream();
+        await e.File.OpenReadStream(LogoUpload.MaxBytes).CopyToAsync(ms);
+        var data = ms.ToArray();
+        // Check what the file really is, not what it's called.
+        if (LogoUpload.DetectExtension(data) is not { } ext) { (_message, _messageIsError) = ("Only PNG and JPG pictures can be used.", true); return; }
+        await Run(actor =>
+        {
+            Products.SetImage(Id, data, ext, actor);
+            return "Picture saved.";
+        });
+    }
+
+    private Task RemovePicture() => Run(actor =>
+    {
+        Products.RemoveImage(Id, actor);
+        return "Picture removed.";
+    });
 
     private async Task Run(Func<WavePOS.Core.Audit.Actor, string> action)
     {

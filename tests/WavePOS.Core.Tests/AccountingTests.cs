@@ -284,8 +284,11 @@ public class AccountingTests
         Assert.False(UserRole.Accountant.Can(Permission.ManageStaff));
         Assert.Equal("/accounting", UserRole.Accountant.HomePage());
 
-        Assert.True(UserRole.Manager.Can(Permission.ManageAccounts));
-        Assert.False(UserRole.Supervisor.Can(Permission.ViewAccounts));
+        Assert.True(UserRole.Admin.Can(Permission.ManageAccounts));
+        Assert.False(UserRole.OperationsManager.Can(Permission.ViewAccounts));
         Assert.Equal("/", UserRole.Cashier.HomePage());
+        Assert.Equal("/inventory", UserRole.Warehousing.HomePage());
+        // An informal business has no books module, so an accountant lands on the stock list instead.
+        Assert.Equal("/inventory", UserRole.Accountant.HomePage(ModuleSet.ForSize(BusinessSize.Informal)));
     }
 }

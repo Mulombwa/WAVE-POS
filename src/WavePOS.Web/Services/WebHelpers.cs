@@ -8,25 +8,27 @@ public static class UserClaims
 {
     private const string UsernameClaim = "wavepos:username";
 
-    public static ClaimsPrincipal ToPrincipal(User user, string scheme) => new(new ClaimsIdentity(
+    public static ClaimsPrincipal ToPrincipal(User user, long businessId, string scheme) => new(new ClaimsIdentity(
     [
         new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
         new Claim(ClaimTypes.Name, user.DisplayName),
         new Claim(UsernameClaim, user.Username),
         new Claim(ClaimTypes.Role, user.Role.ToString()),
+        new Claim(BusinessClaims.BusinessClaim, businessId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
     ], scheme));
 
     /// <summary>
-    /// True if the sign-in still matches an active account in the database
-    /// (same id, username and role). Used to end sessions for deleted, disabled or changed accounts.
+    /// True if the sign-in still matches an active account in an active business (same business, id,
+    /// username and role). Ends sessions for deleted, disabled or changed accounts and suspended businesses.
     /// </summary>
-    public static bool StillValid(ClaimsPrincipal? principal, WavePOS.Data.UserRepository users)
+    public static bool StillValid(ClaimsPrincipal? principal, WavePOS.Data.BusinessRegistry registry)
     {
         if (principal?.Identity?.IsAuthenticated != true) return false;
         var claimed = principal.ToUser();
         if (claimed.Id <= 0) return false;
+        if (registry.DatabaseFor(principal) is not { } db) return false;
 
-        var current = users.GetById(claimed.Id);
+        var current = new WavePOS.Data.UserRepository(db).GetById(claimed.Id);
         return current is { IsActive: true }
             && string.Equals(current.Username, claimed.Username, StringComparison.OrdinalIgnoreCase)
             && current.Role == claimed.Role;

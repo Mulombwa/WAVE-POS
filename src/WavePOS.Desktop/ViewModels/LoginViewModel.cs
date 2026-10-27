@@ -122,7 +122,7 @@ public class LoginViewModel : ObservableObject
 
         try
         {
-            var user = await Task.Run(() => _users.Create(Username, DisplayName, password, UserRole.Manager));
+            var user = await Task.Run(() => _users.Create(Username, DisplayName, password, UserRole.SuperAdmin));
             IsSetupMode = false;
             LoggedIn?.Invoke(user);
         }

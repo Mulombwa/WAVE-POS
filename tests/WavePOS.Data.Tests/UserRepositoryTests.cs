@@ -30,7 +30,7 @@ public sealed class UserRepositoryTests : IDisposable
     [Fact]
     public void Created_user_can_log_in_with_any_username_case()
     {
-        _users.Create("mary", "Mary Banda", "4321", UserRole.Manager);
+        _users.Create("mary", "Mary Banda", "4321", UserRole.Admin);
 
         var result = _users.Authenticate("MARY", "4321");
 
@@ -80,12 +80,12 @@ public sealed class UserRepositoryTests : IDisposable
     [Fact]
     public void User_can_be_loaded_by_id()
     {
-        var created = _users.Create("mary", "Mary Banda", "4321", UserRole.Manager);
+        var created = _users.Create("mary", "Mary Banda", "4321", UserRole.Admin);
 
         var loaded = _users.GetById(created.Id)!;
 
         Assert.Equal("mary", loaded.Username);
-        Assert.Equal(UserRole.Manager, loaded.Role);
+        Assert.Equal(UserRole.Admin, loaded.Role);
         Assert.True(loaded.IsActive);
         Assert.Null(_users.GetById(created.Id + 100));
     }

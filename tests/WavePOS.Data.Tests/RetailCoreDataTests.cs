@@ -18,7 +18,7 @@ public sealed class RetailCoreDataTests : IDisposable
     {
         _db = new PosDatabase(_path);
         _db.Initialize();
-        _manager = new UserRepository(_db).Create("mary", "Mary Banda", "4321", UserRole.Manager);
+        _manager = new UserRepository(_db).Create("mary", "Mary Banda", "4321", UserRole.Admin);
         _mary = new Actor(_manager.Id, _manager.DisplayName);
     }
 
@@ -206,17 +206,48 @@ public sealed class RetailCoreDataTests : IDisposable
     // ---------- Staff ----------
 
     [Fact]
-    public void Last_active_manager_cannot_be_demoted_or_disabled()
+    public void Last_active_super_admin_cannot_be_demoted_or_disabled()
     {
         var users = new UserRepository(_db);
         var me = users.GetById(_manager.Id)!;
+        me.Role = UserRole.SuperAdmin;
+        users.Update(me, _mary);
         me.Role = UserRole.Cashier;
         Assert.Throws<InvalidOperationException>(() => users.Update(me, _mary));
 
-        var second = users.Create(new User { Username = "john", DisplayName = "John Phiri", Role = UserRole.Manager }, "1111", _mary);
-        users.Update(me, _mary); // fine now there's another manager
+        var second = users.Create(new User { Username = "john", DisplayName = "John Phiri", Role = UserRole.SuperAdmin }, "1111", _mary);
+        users.Update(me, _mary); // fine now there's another super admin
         Assert.Equal(UserRole.Cashier, users.GetById(_manager.Id)!.Role);
-        Assert.Equal(UserRole.Manager, second.Role);
+        Assert.Equal(UserRole.SuperAdmin, second.Role);
+    }
+
+    [Fact]
+    public void Only_a_super_admin_manages_admins()
+    {
+        var users = new UserRepository(_db);
+        Assert.Throws<InvalidOperationException>(() =>
+            users.Create(new User { Username = "ada", DisplayName = "Ada", Role = UserRole.Admin }, "1111", _mary, actorRole: UserRole.Admin));
+        var clerk = users.Create(new User { Username = "wes", DisplayName = "Wes", Role = UserRole.Warehousing }, "1111", _mary, actorRole: UserRole.Admin);
+        clerk.Role = UserRole.Admin;
+        Assert.Throws<InvalidOperationException>(() => users.Update(clerk, _mary, UserRole.Admin));     // can't promote to admin
+        Assert.Throws<InvalidOperationException>(() => users.ResetPassword(_manager.Id, "9999", _mary, UserRole.Admin)); // can't touch an admin
+        users.Update(clerk, _mary, UserRole.SuperAdmin);
+        Assert.Equal(UserRole.Admin, users.GetById(clerk.Id)!.Role);
+    }
+
+    [Fact]
+    public void Old_role_names_are_upgraded_and_the_first_admin_becomes_super_admin()
+    {
+        using (var conn = _db.Open())
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "UPDATE users SET role = 'Manager'; INSERT INTO users (username, display_name, password_hash, role, created_at) VALUES ('sue', 'Sue', 'x', 'Supervisor', '2026-01-01');";
+            cmd.ExecuteNonQuery();
+        }
+        _db.Initialize();
+        var all = new UserRepository(_db).GetAll();
+        Assert.Equal(UserRole.SuperAdmin, all.Single(u => u.Username == "mary").Role);
+        Assert.Equal(UserRole.OperationsManager, all.Single(u => u.Username == "sue").Role);
     }
 
     [Fact]

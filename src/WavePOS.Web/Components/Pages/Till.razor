@@ -7,6 +7,7 @@
 @inject DraftInvoiceRepository Drafts
 @inject SettingsRepository Settings
 @inject CustomerRepository CustomerData
+@inject CurrentBusiness Current
 @inject IJSRuntime JS
 
 <PageTitle>Till · WAVE POS</PageTitle>
@@ -20,7 +21,8 @@
         <div class="product-grid">
             @foreach (var p in _products)
             {
-                <button type="button" class="product-tile @(p.StockQuantity <= 0 ? "out" : p.IsLowStock ? "low" : "")" @onclick="() => Add(p)">
+                <button type="button" class="product-tile @(p.StockQuantity <= 0 ? "out" : p.IsLowStock ? "low" : "") @(p.ImageFile is null ? "" : "has-image")" @onclick="() => Add(p)">
+                    @if (p.ImageFile is { } img) { <img class="tile-image" src="/media/products/@p.Id?v=@img" alt="" loading="lazy" /> }
                     <span class="category">@p.Category</span>
                     <span class="name">@p.Name</span>
                     <span class="tile-foot">
@@ -42,19 +44,22 @@
             <h2>Current sale</h2>
             <button type="button" class="btn small" disabled="@_cart.IsEmpty" @onclick="ClearCart">Clear</button>
         </div>
-        <div class="cart-customer">
-            @if (_customer is null)
-            {
-                <button type="button" class="btn small outline" @onclick="OpenCustomerDialog">+ Add customer</button>
-            }
-            else
-            {
-                <span class="chip">
-                    👤 @_customer.Name <span class="muted">@_customer.Phone</span>
-                    <button type="button" class="chip-x" aria-label="Remove customer" @onclick="() => _customer = null">✕</button>
-                </span>
-            }
-        </div>
+        @if (_customersOn)
+        {
+            <div class="cart-customer">
+                @if (_customer is null)
+                {
+                    <button type="button" class="btn small outline" @onclick="OpenCustomerDialog">+ Add customer</button>
+                }
+                else
+                {
+                    <span class="chip">
+                        👤 @_customer.Name <span class="muted">@_customer.Phone</span>
+                        <button type="button" class="chip-x" aria-label="Remove customer" @onclick="() => _customer = null">✕</button>
+                    </span>
+                }
+            </div>
+        }
 
         <div class="cart-lines">
             @if (_cart.IsEmpty)
@@ -239,6 +244,7 @@
     protected override async Task OnInitializedAsync()
     {
         _cashier = (await AuthState).User.ToUser();
+        _customersOn = _cashier.Role.Can(Permission.ViewCustomers, Current.Modules);
         _autoPrint = Settings.GetPrintSettings().AutoPrintReceipt;
         LoadProducts();
         SetStatus($"Welcome, {_cashier.DisplayName}. Scan a barcode or tap a product.");
@@ -433,6 +439,7 @@
     // ---------- Customer ----------
 
     private Customer? _customer;
+    private bool _customersOn;
     private bool _showCustomerDialog, _focusCustomerSearch, _quickAdd;
     private ElementReference _customerSearchBox;
     private string _customerSearch = "";

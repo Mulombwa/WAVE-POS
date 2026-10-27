@@ -126,11 +126,13 @@ public class PosDatabase
         AddColumnIfMissing(conn, "users", "phone", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(conn, "users", "email", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(conn, "sale_lines", "unit_cost_ngwee", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing(conn, "products", "image_file", "TEXT");
 
         CreateRetailTables(conn);
         CreateAccountingTables(conn);
         CreateOrderTables(conn);
         CreateHrTables(conn);
+        UpgradeRoles(conn);
         AddColumnIfMissing(conn, "customers", "tpin", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(conn, "customers", "credit_limit_ngwee", "INTEGER");
         AddColumnIfMissing(conn, "customers", "payment_terms_days", "INTEGER NOT NULL DEFAULT 0");
@@ -643,6 +645,23 @@ public class PosDatabase
                 annual_leave_balance   REAL    NOT NULL DEFAULT 0,
                 UNIQUE (run_id, employee_id)
             );
+            """;
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Roles were expanded: Manager became Admin and Supervisor became Operations manager. Every business
+    /// needs a super admin (the owner), so the longest-standing active admin becomes one if there isn't one.
+    /// </summary>
+    private static void UpgradeRoles(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE users SET role = 'Admin' WHERE role = 'Manager';
+            UPDATE users SET role = 'OperationsManager' WHERE role = 'Supervisor';
+            UPDATE users SET role = 'SuperAdmin'
+            WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'SuperAdmin' AND is_active = 1)
+              AND id = (SELECT MIN(id) FROM users WHERE role = 'Admin' AND is_active = 1);
             """;
         cmd.ExecuteNonQuery();
     }

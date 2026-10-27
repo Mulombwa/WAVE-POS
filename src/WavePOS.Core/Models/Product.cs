@@ -32,6 +32,9 @@ public class Product
     public string? Option1 { get; set; }
     public string? Option2 { get; set; }
 
+    /// <summary>File name of the product's picture in the business's data folder, or null.</summary>
+    public string? ImageFile { get; set; }
+
     public bool IsLowStock => ReorderLevel > 0 && StockQuantity <= ReorderLevel;
     public decimal StockValue => Cost * Math.Max(StockQuantity, 0);
 }

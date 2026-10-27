@@ -38,8 +38,14 @@ public class UserRepository(PosDatabase db)
     public User Create(string username, string displayName, string password, UserRole role, Actor? actor = null) =>
         Create(new User { Username = username, DisplayName = displayName, Role = role }, password, actor);
 
-    public User Create(User user, string password, Actor? actor = null)
+    /// <summary>
+    /// Adds a sign-in account. Pass <paramref name="actorRole"/> (the role of whoever is doing it) so that only a
+    /// super admin can create admins and super admins.
+    /// </summary>
+    public User Create(User user, string password, Actor? actor = null, UserRole? actorRole = null)
     {
+        if (actorRole is { } ar && !ar.CanAssign(user.Role))
+            throw new InvalidOperationException($"Only a super admin can create {user.Role.Label()} accounts.");
         var username = user.Username.Trim();
         var displayName = user.DisplayName.Trim();
         if (username.Length == 0) throw new ArgumentException("Username is required.");
@@ -76,23 +82,28 @@ public class UserRepository(PosDatabase db)
 
         var by = actor ?? new Actor(id, displayName); // first-time setup: the new manager creates themself
         AuditRepository.Write(conn, tx, by, AuditActions.UserCreated, "user", id.ToString(CultureInfo.InvariantCulture),
-            $"Created {user.Role} account \"{username}\" for {displayName}");
+            $"Created {user.Role.Label()} account \"{username}\" for {displayName}");
         tx.Commit();
         return GetById(id)!;
     }
 
-    /// <summary>Updates name, role, active flag and employee details. Keeps at least one active manager.</summary>
-    public void Update(User user, Actor actor)
+    /// <summary>
+    /// Updates name, role, active flag and employee details. Keeps at least one active super admin, and
+    /// (when <paramref name="actorRole"/> is given) only lets a super admin change admins and super admins.
+    /// </summary>
+    public void Update(User user, Actor actor, UserRole? actorRole = null)
     {
         if (string.IsNullOrWhiteSpace(user.DisplayName)) throw new ArgumentException("Name is required.");
 
         using var conn = db.Open();
         using var tx = conn.BeginTransaction();
         var before = GetById(conn, tx, user.Id) ?? throw new InvalidOperationException("User not found.");
+        if (actorRole is { } ar && (!ar.CanAssign(before.Role) || !ar.CanAssign(user.Role)))
+            throw new InvalidOperationException("Only a super admin can change admin and super admin accounts.");
 
-        var stillManager = user.IsActive && user.Role == UserRole.Manager;
-        if (before.IsActive && before.Role == UserRole.Manager && !stillManager && CountActiveManagers(conn, tx) <= 1)
-            throw new InvalidOperationException("There must be at least one active manager. Make someone else a manager first.");
+        var stillSuper = user.IsActive && user.Role == UserRole.SuperAdmin;
+        if (before.IsActive && before.Role == UserRole.SuperAdmin && !stillSuper && CountActiveSuperAdmins(conn, tx) <= 1)
+            throw new InvalidOperationException("There must be at least one active super admin. Make someone else super admin first.");
 
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -111,7 +122,7 @@ public class UserRepository(PosDatabase db)
 
         var changes = new List<string>();
         if (before.DisplayName != user.DisplayName.Trim()) changes.Add($"name → {user.DisplayName.Trim()}");
-        if (before.Role != user.Role) changes.Add($"role {before.Role} → {user.Role}");
+        if (before.Role != user.Role) changes.Add($"role {before.Role.Label()} → {user.Role.Label()}");
         if (before.IsActive != user.IsActive) changes.Add(user.IsActive ? "re-enabled" : "disabled");
         if (before.EmployeeCode != user.EmployeeCode.Trim() || before.Phone != user.Phone.Trim() || before.Email != user.Email.Trim())
             changes.Add("employee details");
@@ -122,12 +133,14 @@ public class UserRepository(PosDatabase db)
     }
 
     /// <summary>Sets a new PIN/password (e.g. when someone forgets theirs) and clears any lockout.</summary>
-    public void ResetPassword(long userId, string newPassword, Actor actor)
+    public void ResetPassword(long userId, string newPassword, Actor actor, UserRole? actorRole = null)
     {
         if (PasswordHasher.Validate(newPassword) is { } error) throw new ArgumentException(error);
         using var conn = db.Open();
         using var tx = conn.BeginTransaction();
         var user = GetById(conn, tx, userId) ?? throw new InvalidOperationException("User not found.");
+        if (actorRole is { } ar && !ar.CanAssign(user.Role))
+            throw new InvalidOperationException("Only a super admin can reset an admin's or super admin's PIN.");
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = "UPDATE users SET password_hash = $h, failed_attempts = 0, locked_until = NULL WHERE id = $id;";
@@ -239,11 +252,11 @@ public class UserRepository(PosDatabase db)
     private static void Audit(SqliteConnection conn, SqliteTransaction tx, Actor actor, string action, long? userId, string details) =>
         AuditRepository.Write(conn, tx, actor, action, "user", userId?.ToString(CultureInfo.InvariantCulture), details);
 
-    private static int CountActiveManagers(SqliteConnection conn, SqliteTransaction tx)
+    private static int CountActiveSuperAdmins(SqliteConnection conn, SqliteTransaction tx)
     {
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = "SELECT COUNT(*) FROM users WHERE is_active = 1 AND role = 'Manager';";
+        cmd.CommandText = "SELECT COUNT(*) FROM users WHERE is_active = 1 AND role = 'SuperAdmin';";
         return Convert.ToInt32(cmd.ExecuteScalar());
     }
 

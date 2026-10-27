@@ -24,7 +24,7 @@ public sealed class AccountingDataTests : IDisposable
         _db.Initialize();
         _ledger = new LedgerRepository(_db);
         _bank = new BankRepository(_db);
-        _manager = new UserRepository(_db).Create("ann", "Ann Phiri", "4321", UserRole.Manager);
+        _manager = new UserRepository(_db).Create("ann", "Ann Phiri", "4321", UserRole.Admin);
         _ann = new Actor(_manager.Id, _manager.DisplayName);
     }
 

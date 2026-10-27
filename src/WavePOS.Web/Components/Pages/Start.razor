@@ -1,0 +1,73 @@
+@page "/start"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject CurrentBusiness Current
+@inject ProductRepository Products
+@inject UserRepository Users
+@inject SettingsRepository Settings
+
+<PageTitle>Getting started · WAVE POS</PageTitle>
+
+<div class="page">
+    @if (Current.Business is { } b)
+    {
+        <h1>@(NewQuery == 1 ? $"Welcome, {b.Name}!" : "Getting started")</h1>
+
+        <section class="card code-card">
+            <div>
+                <span class="muted">Your business code</span>
+                <strong class="mono big-code">@b.Code</strong>
+            </div>
+            <p class="muted">
+                Staff type this code, their username and PIN to sign in, on any phone, tablet or computer at
+                <span class="mono">@Navigation.BaseUri.TrimEnd('/')/login</span>. Each device remembers it after the first time.
+            </p>
+        </section>
+
+        <section class="card">
+            <h2>Your checklist</h2>
+            <ul class="checklist">
+                <li class="@(_hasProfile ? "done" : "")">
+                    <strong>Business details and logo</strong> <span class="muted">for receipts and invoices</span>
+                    @if (_role.Can(Permission.ManageSettings)) { <a class="btn small outline" href="/settings">Open settings</a> }
+                </li>
+                <li class="@(_productCount > 0 ? "done" : "")">
+                    <strong>Add your products</strong> <span class="muted">with prices, pictures and how many you have (@_productCount so far)</span>
+                    @if (_role.Can(Permission.ManageInventory, Current.Modules)) { <a class="btn small outline" href="/inventory/new">Add a product</a> }
+                </li>
+                <li class="@(_staffCount > 1 ? "done" : "")">
+                    <strong>Add your staff</strong> <span class="muted">each with their own role and PIN (@_staffCount account(s))</span>
+                    @if (_role.Can(Permission.ManageStaff)) { <a class="btn small outline" href="/staff">Add staff</a> }
+                </li>
+                <li>
+                    <strong>Choose what you use</strong> <span class="muted">@b.Size.Label(): @string.Join(", ", Enum.GetValues<Module>().Where(b.Modules.Has).Select(m => m.Label()))</span>
+                    @if (_role.Can(Permission.ManageModules)) { <a class="btn small outline" href="/settings/modules">Modules</a> }
+                </li>
+                <li>
+                    <strong>Make your first sale</strong> <span class="muted">tap a product on the till, take the money, print or skip the receipt</span>
+                    @if (_role.Can(Permission.Sell, Current.Modules)) { <a class="btn small primary" href="/">Open the till</a> }
+                </li>
+            </ul>
+        </section>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "new")] public int? NewQuery { get; set; }
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    private UserRole _role;
+    private int _productCount, _staffCount;
+    private bool _hasProfile;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        if (Current.Business is null) return;
+        _productCount = Products.GetAll().Count;
+        _staffCount = Users.GetAll().Count;
+        var p = Settings.GetBusinessProfile();
+        _hasProfile = p.HasCustomLogo || p.Address.Length > 0;
+    }
+}

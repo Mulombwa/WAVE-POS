@@ -2,151 +2,123 @@
 @layout BareLayout
 @using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Authentication.Cookies
-@using WavePOS.Core.Security
-@inject UserRepository Users
-@inject SettingsRepository Settings
+@inject BusinessRegistry Businesses
 @inject NavigationManager Navigation
 
 @* Static server-rendered form: the sign-in cookie is set on a normal HTTP POST. *@
-<PageTitle>@(_setup ? "Set up" : "Sign in") · WAVE POS</PageTitle>
+<PageTitle>Sign in · WAVE POS</PageTitle>
 
 <div class="login">
     <section class="login-brand">
         <div class="login-logo">
-            <img src="@Branding.LogoUrl(_profile)" alt="@_profile.Name logo" />
-            <p>Point of sale</p>
+            <img src="/img/wave-logo.svg" alt="WAVE POS" />
+            <p>Point of sale &amp; business management</p>
         </div>
         <p class="login-date">@DateTime.Now.ToString("dddd, d MMMM yyyy")</p>
     </section>
 
     <section class="login-form-side">
         <div class="card login-card">
-            <h1>@(_setup ? "Welcome to WAVE POS" : "Sign in")</h1>
-            <p class="muted">
-                @(_setup
-                    ? "Create the manager account. You'll use it to add cashiers and manage the shop."
-                    : "Enter your username and PIN or password.")
-            </p>
+            <h1>Sign in</h1>
+            <p class="muted">Enter your business code, username and PIN or password.</p>
 
             <EditForm Model="Input" method="post" OnSubmit="SubmitAsync" FormName="login">
-                @if (_setup)
-                {
-                    <label class="field">
-                        <span>Full name</span>
-                        <InputText @bind-Value="Input.DisplayName" autocomplete="name" autofocus />
-                    </label>
-                }
+                <label class="field">
+                    <span>Business code</span>
+                    <InputText @bind-Value="Input.BusinessCode" autocomplete="organization" autocapitalize="none" spellcheck="false"
+                               autofocus="@(string.IsNullOrEmpty(Input.BusinessCode))" placeholder="e.g. mwila-salon" />
+                </label>
                 <label class="field">
                     <span>Username</span>
-                    <InputText @bind-Value="Input.Username" autocomplete="username" autofocus="@(!_setup)" />
+                    <InputText @bind-Value="Input.Username" autocomplete="username" autocapitalize="none"
+                               autofocus="@(!string.IsNullOrEmpty(Input.BusinessCode))" />
                 </label>
                 <label class="field">
                     <span>PIN or password</span>
-                    <InputText type="password" @bind-Value="Input.Password"
-                               autocomplete="@(_setup ? "new-password" : "current-password")" />
+                    <InputText type="password" @bind-Value="Input.Password" autocomplete="current-password" />
                 </label>
-                @if (_setup)
-                {
-                    <label class="field">
-                        <span>Confirm PIN or password</span>
-                        <InputText type="password" @bind-Value="Input.ConfirmPassword" autocomplete="new-password" />
-                    </label>
-                }
 
                 @if (_error is not null)
                 {
                     <div class="alert error" role="alert">@_error</div>
                 }
 
-                <button type="submit" class="btn primary block large">@(_setup ? "Create account & start" : "Sign in")</button>
+                <button type="submit" class="btn primary block large">Sign in</button>
             </EditForm>
+            <p class="center muted signup-link">New here? <a href="/welcome">Create a free business account</a></p>
         </div>
         <BuiltByWave />
     </section>
 </div>
 
 @code {
+    private const string BusinessCookie = "WavePOS.Business";
+
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
     // Set from the posted form; created in OnInitialized for the first (GET) render.
-    // (No initializer here: a posted form would overwrite it anyway.)
 #pragma warning disable CS8618
     [SupplyParameterFromForm] private LoginInput Input { get; set; }
 #pragma warning restore CS8618
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery(Name = "business")] private string? BusinessQuery { get; set; }
 
-    private bool _setup;
     private string? _error;
-    private BusinessProfile _profile = new();
 
     protected override void OnInitialized()
     {
-        Input ??= new();
-        _setup = !Users.AnyUsers();
-        _profile = Settings.GetBusinessProfile();
+        Input ??= new(); // first, because the page still renders while redirecting
+        if (!Businesses.Any() && !HttpMethods.IsPost(HttpContext.Request.Method))
+        {
+            Navigation.NavigateTo("/welcome", forceLoad: true); // nobody has signed up yet
+            return;
+        }
+        if (string.IsNullOrEmpty(Input.BusinessCode))
+            Input.BusinessCode = BusinessQuery ?? HttpContext.Request.Cookies[BusinessCookie] ?? "";
     }
 
     private async Task SubmitAsync()
     {
-        var user = _setup ? CreateFirstManager() : SignInExisting();
+        var password = Input.Password;
+        Input.Password = ""; // never send a password back to the browser
 
-        // Never send a password back to the browser.
-        Input.Password = "";
-        Input.ConfirmPassword = "";
-        if (user is null) return;
+        if (string.IsNullOrWhiteSpace(Input.BusinessCode)) { _error = "Enter your business code."; return; }
+        if (string.IsNullOrWhiteSpace(Input.Username)) { _error = "Enter your username."; return; }
+        if (string.IsNullOrEmpty(password)) { _error = "Enter your PIN or password."; return; }
 
-        await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
-            UserClaims.ToPrincipal(user, CookieAuthenticationDefaults.AuthenticationScheme));
-        Navigation.NavigateTo(SafeReturnUrl(user), forceLoad: true);
-    }
+        var business = Businesses.Find(Input.BusinessCode);
+        if (business is null) { _error = "No business has that code. Check with your manager, or create a business account."; return; }
+        if (!business.IsActive) { _error = "This business account is suspended. Contact Wave support."; return; }
 
-    private User? SignInExisting()
-    {
-        if (string.IsNullOrWhiteSpace(Input.Username)) { _error = "Enter your username."; return null; }
-        if (string.IsNullOrEmpty(Input.Password)) { _error = "Enter your PIN or password."; return null; }
-
-        var result = Users.Authenticate(Input.Username, Input.Password);
+        var result = new UserRepository(Businesses.Database(business)).Authenticate(Input.Username, password);
         _error = result.Status switch
         {
             LoginStatus.Success => null,
             LoginStatus.LockedOut => $"Too many wrong attempts. Try again after {result.LockedUntil:HH:mm}.",
-            LoginStatus.Disabled => "This account has been disabled. Ask a manager.",
+            LoginStatus.Disabled => "This account has been disabled. Ask your admin.",
             _ => "Wrong username or password.",
         };
-        return result.User;
+        if (result.User is not { } user || _error is not null) return;
+
+        await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+            UserClaims.ToPrincipal(user, business.Id, CookieAuthenticationDefaults.AuthenticationScheme));
+        // Remember the business code on this device so staff only type it once.
+        HttpContext.Response.Cookies.Append(BusinessCookie, business.Code, new CookieOptions
+        {
+            HttpOnly = true, SameSite = SameSiteMode.Lax, Secure = HttpContext.Request.IsHttps, Expires = DateTimeOffset.Now.AddYears(1),
+        });
+        Navigation.NavigateTo(SafeReturnUrl(user, business), forceLoad: true);
     }
 
-    private User? CreateFirstManager()
-    {
-        // Re-check: someone else may have finished setup since this page loaded.
-        if (Users.AnyUsers()) { _setup = false; _error = "Setup is already done. Please sign in."; return null; }
-        if (string.IsNullOrWhiteSpace(Input.DisplayName)) { _error = "Enter your full name."; return null; }
-        if (string.IsNullOrWhiteSpace(Input.Username)) { _error = "Enter a username."; return null; }
-        if (PasswordHasher.Validate(Input.Password) is { } problem) { _error = problem; return null; }
-        if (Input.Password != Input.ConfirmPassword) { _error = "The two passwords don't match."; return null; }
-
-        try
-        {
-            return Users.Create(Input.Username, Input.DisplayName, Input.Password, UserRole.Manager);
-        }
-        catch (ArgumentException ex)
-        {
-            _error = ex.Message;
-            return null;
-        }
-    }
-
-    /// <summary>Only allow redirects within this site.</summary>
-    // Only local addresses (no open redirects). With none, the person's home page: the till, or the books for accountants.
-    private string SafeReturnUrl(User user) =>
+    // Only local addresses (no open redirects). With none, the person's home page.
+    private string SafeReturnUrl(User user, Business business) =>
         !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl != "/" && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//") && !ReturnUrl.StartsWith("/\\")
             ? ReturnUrl
-            : user.Role.HomePage();
+            : user.Role.HomePage(business.Modules);
 
     private sealed class LoginInput
     {
-        public string DisplayName { get; set; } = "";
+        public string BusinessCode { get; set; } = "";
         public string Username { get; set; } = "";
         public string Password { get; set; } = "";
-        public string ConfirmPassword { get; set; } = "";
     }
 }

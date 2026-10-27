@@ -75,7 +75,7 @@ public sealed class SettingsAndDraftTests : IDisposable
     public void Saved_draft_and_sale_can_be_loaded_back_for_reprinting()
     {
         var users = new UserRepository(_db);
-        var mary = users.Create("mary", "Mary Banda", "4321", UserRole.Manager);
+        var mary = users.Create("mary", "Mary Banda", "4321", UserRole.Admin);
         var products = new ProductRepository(_db).GetAll();
         var cart = new Cart();
         cart.Add(products[0], 3);

@@ -38,14 +38,44 @@ Then open http://localhost:5254. It works on PCs, tablets and phones.
 - The web portal and the desktop app each have their **own** database for now. Sharing one set of data across tills and the web needs a central server database (a planned next step).
 - For use over the internet, host it behind HTTPS.
 
+## Businesses, roles and modules
+
+One WAVE POS server hosts many businesses, from a market stall to a large organisation.
+
+- **Sign-up** (`/welcome`): a public intro page where a business enters its name, town, phone, optional TPIN and the owner's sign-in, and picks a size. It gets its own private database in its own folder (`businesses/{id}/`), so its data, logo and product pictures can never be reached from another business's account. The owner becomes the **super admin** and lands on a *Getting started* checklist (business details, products with pictures, staff, modules, first sale).
+- **Signing in**: business code + username + PIN. The code (e.g. `mwila-salon`) is made from the business name and shown after sign-up; each device remembers it. Sign-up and sign-in attempts are rate-limited per address.
+- **Upgrading**: the database from a single-business install is adopted automatically as the first business, with every module on. Managers become admins, supervisors become operations managers, and the longest-standing admin becomes super admin.
+- **Modules**, chosen by size at sign-up and changed by the super admin under *Modules*. Menus and pages for switched-off modules disappear for everyone; switching a module back on brings its data back. The till and stock are always on; purchasing, sales orders and HR need the books.
+
+| Size | Modules |
+| --- | --- |
+| Informal | Till, inventory |
+| Small | + customers, returns & refunds, accounting |
+| Large | + purchasing, sales orders, HR & payroll |
+
+- **Roles** (what each can do, within the modules that are on):
+
+| Role | Can do |
+| --- | --- |
+| Super admin | Everything, including modules and managing admins. At least one must stay active. |
+| Admin | Everything except modules and admin accounts |
+| Operations manager | Stock, buying and selling day to day; approves purchase orders and refunds; attendance; audit trail |
+| Accountant / bookkeeper | The books, bills, invoices, payments, payroll |
+| Sales | Till, customers, quotes and sales orders |
+| Warehousing | Receive goods, deliver orders, adjust and count stock |
+| Cashier | Till and customer look-up |
+
+  Only a super admin can create, change or reset the PIN of an admin or super admin.
+- **Product pictures**: PNG or JPG up to 2 MB on each product's page (checked by file contents, not name). One picture covers every size and colour. Pictures show on the till and in the stock list, and are only served to people signed in to that business.
+
 ## Retail back office (web portal)
 
 | Section | Who | What |
 | --- | --- | --- |
 | **Inventory** | Everyone can view; supervisors adjust; managers edit | Products with variants (e.g. Size × Colour, each with its own SKU and stock), cost and margin, reorder levels, low/out-of-stock alerts, stock value. Receive stock (weighted-average cost), adjust (damaged, expired, theft) and stock counts. Every change is in the stock ledger. |
 | **Customers** | Everyone can look up; supervisors edit; managers handle data requests | Customer profiles, purchase history, visits and spend. Marketing consent is recorded with a date. Attach a customer to a sale at the till. |
-| **Returns** | Supervisors and managers | Refund all or part of a sale by receipt number, choose whether items go back in stock, print a refund slip. Can't refund more than was sold. Exchanges = refund + new sale. |
-| **Staff** | Managers | Unlimited users. Roles: Cashier, Supervisor, Manager, Accountant / bookkeeper. Employee details, disable accounts, reset PINs. At least one manager must stay active. |
+| **Returns** | Operations managers and admins | Refund all or part of a sale by receipt number, choose whether items go back in stock, print a refund slip. Can't refund more than was sold. Exchanges = refund + new sale. |
+| **Staff** | Super admins, admins | Unlimited users with the roles above. Employee details, disable accounts, reset PINs. |
 | **Audit trail** | Managers, accountants | Sign-ins (incl. failed and lockouts), sales, refunds, stock and price changes, customer data access/exports, journals, bank reconciliation, staff and settings changes. Append-only and hash-chained, with an integrity check and CSV export. |
 | **Accounts** | Managers, accountants | Double-entry books, see below. |
 
@@ -99,9 +129,11 @@ WAVE POS is growing into an ERP. Buying and selling on account sit alongside the
 
 | Role | Purchasing & sales orders |
 | --- | --- |
-| Supervisor | Raise purchase orders, receive goods, raise quotes, confirm orders (within credit limits) and deliver |
+| Operations manager | Raise and approve purchase orders, receive goods, raise quotes, confirm orders (within credit limits) and deliver |
+| Sales | Raise quotes and confirm orders (within credit limits) |
+| Warehousing | Receive goods and deliver orders |
 | Accountant / bookkeeper | See everything; enter supplier bills, raise invoices, record payments |
-| Manager | Everything, including approving big orders, setting the approval limit and credit limits, and credit-limit overrides |
+| Admin / super admin | Everything, including approving big orders, setting the approval limit and credit limits, and credit-limit overrides |
 
 Printed invoices are titled *Invoice*. ZRA requires VAT-registered businesses to issue tax invoices through **ZRA Smart Invoice**; connecting to it is on the roadmap.
 
@@ -123,9 +155,9 @@ Under **HR & payroll**.
 
 | Role | HR & payroll |
 | --- | --- |
-| Supervisor | Staff directory, attendance register, request leave |
+| Operations manager | Staff directory, attendance register, request leave |
 | Accountant / bookkeeper | Staff directory, prepare payroll, payslips, record wages paid |
-| Manager | Everything, including employee records and contracts, approving leave and payroll, and changing rates |
+| Admin / super admin | Everything, including employee records and contracts, approving leave and payroll, and changing rates |
 
 ## Roadmap
 
@@ -141,8 +173,8 @@ Under **HR & payroll**.
 
 ## Logging in
 
-- On first start there are no accounts, so the app asks you to create the **manager** account.
-- After that, everyone signs in with a username and PIN/password (at least 4 characters). There's an on-screen keypad for touch screens.
+- **Web portal:** a new business signs up on `/welcome`; after that, staff sign in with the business code, their username and PIN/password (at least 4 characters).
+- **Desktop till:** on first start there are no accounts, so it asks you to create the **super admin** account. There's an on-screen keypad for touch screens.
 - 5 wrong attempts lock that account for 5 minutes.
 - Passwords are stored as salted PBKDF2 hashes, never as plain text.
 - Every sale records which user made it. **Log out** is in the top-right of the till.

@@ -50,7 +50,11 @@
                 @foreach (var p in _products)
                 {
                     <tr class="@(p.IsActive ? "" : "inactive")">
-                        <td><a href="/inventory/@p.Id">@p.Name</a>@if (!p.IsActive) { <span class="badge">Inactive</span> }</td>
+                        <td class="product-cell">
+                            @if (p.ImageFile is { } img) { <img class="thumb" src="/media/products/@p.Id?v=@img" alt="" loading="lazy" /> }
+                            else { <span class="thumb empty-thumb" aria-hidden="true"></span> }
+                            <a href="/inventory/@p.Id">@p.Name</a>@if (!p.IsActive) { <span class="badge">Inactive</span> }
+                        </td>
                         <td class="mono">@p.Sku</td>
                         <td>@p.Category</td>
                         <td class="num">@Money.Format(p.Price)</td>

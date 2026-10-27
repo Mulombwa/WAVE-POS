@@ -1,0 +1,143 @@
+@page "/welcome"
+@layout BareLayout
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject BusinessRegistry Businesses
+@inject NavigationManager Navigation
+
+@* Public intro page and sign-up. Static server-rendered so the sign-in cookie is set on a normal POST. *@
+<PageTitle>WAVE POS · Run your business from one place</PageTitle>
+
+<div class="welcome">
+    <header class="welcome-top">
+        <img src="/img/wave-logo.svg" alt="WAVE POS" class="welcome-logo" />
+        <a class="btn outline" href="/login">Sign in</a>
+    </header>
+
+    <section class="welcome-hero">
+        <h1>Sell, track stock and keep your books, from any phone or computer.</h1>
+        <p>
+            WAVE POS grows with you: a market stall or salon can start with just a till and a stock list,
+            and switch on customers, the books, purchasing, sales orders and HR &amp; payroll as the business grows.
+            Built in Zambia for Zambian VAT, ZRA and NAPSA.
+        </p>
+    </section>
+
+    <section class="welcome-sizes">
+        @foreach (var size in Enum.GetValues<BusinessSize>())
+        {
+            <div class="card size-card">
+                <h2>@size.Label()</h2>
+                <p class="muted">@size.Description()</p>
+                <ul class="small-list">
+                    @foreach (var m in ModuleSet.ForSize(size).On.OrderBy(m => m)) { <li>@m.Label()</li> }
+                </ul>
+            </div>
+        }
+    </section>
+
+    <section class="card welcome-form" id="start">
+        <h2>Create your business account</h2>
+        <p class="muted">It takes a minute. You'll be the super admin and can add staff, products and pictures straight away.</p>
+
+        <EditForm Model="Input" method="post" OnSubmit="SubmitAsync" FormName="signup" FormAction="/welcome#start">
+            <h3 class="sub">Your business</h3>
+            <div class="two-col">
+                <label class="field"><span>Business name</span><InputText @bind-Value="Input.BusinessName" autocomplete="organization" /></label>
+                <label class="field"><span>Town or area</span><InputText @bind-Value="Input.Town" placeholder="e.g. Kalingalinga, Lusaka" /></label>
+                <label class="field"><span>Phone</span><InputText type="tel" @bind-Value="Input.Phone" autocomplete="tel" placeholder="e.g. 0977 123456" /></label>
+                <label class="field"><span>Email (optional)</span><InputText type="email" @bind-Value="Input.Email" autocomplete="email" /></label>
+                <label class="field"><span>ZRA TPIN (optional)</span><InputText @bind-Value="Input.Tpin" inputmode="numeric" maxlength="10" /></label>
+            </div>
+
+            <fieldset class="plain size-choice">
+                <legend>What kind of business?</legend>
+                <InputRadioGroup @bind-Value="Input.Size">
+                    @foreach (var size in Enum.GetValues<BusinessSize>())
+                    {
+                        <label class="radio-card">
+                            <InputRadio Value="size" />
+                            <span><strong>@size.Label()</strong><br /><span class="muted small">@size.Description()</span></span>
+                        </label>
+                    }
+                </InputRadioGroup>
+                <p class="muted small">You can switch parts on or off later.</p>
+            </fieldset>
+
+            <h3 class="sub">Your sign-in</h3>
+            <div class="two-col">
+                <label class="field"><span>Your full name</span><InputText @bind-Value="Input.OwnerName" autocomplete="name" /></label>
+                <label class="field"><span>Username</span><InputText @bind-Value="Input.Username" autocomplete="username" autocapitalize="none" /></label>
+                <label class="field"><span>PIN or password (at least 4 characters)</span><InputText type="password" @bind-Value="Input.Password" autocomplete="new-password" /></label>
+                <label class="field"><span>Confirm PIN or password</span><InputText type="password" @bind-Value="Input.ConfirmPassword" autocomplete="new-password" /></label>
+            </div>
+
+            <label class="check"><InputCheckbox @bind-Value="Input.SampleProducts" /> Start with a few sample products to try it out</label>
+            <label class="check">
+                <InputCheckbox @bind-Value="Input.Agree" />
+                I agree that Wave Cyber Security keeps these details to run my account, as allowed by Zambia's Data Protection Act 2021.
+                My business's data stays private to my business.
+            </label>
+
+            @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+            <button type="submit" class="btn primary large">Create my business account</button>
+        </EditForm>
+    </section>
+
+    <footer class="welcome-foot"><BuiltByWave /></footer>
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+#pragma warning disable CS8618
+    [SupplyParameterFromForm] private SignUpInput Input { get; set; }
+#pragma warning restore CS8618
+
+    private string? _error;
+
+    protected override void OnInitialized() => Input ??= new();
+
+    private async Task SubmitAsync()
+    {
+        var password = Input.Password;
+        var confirm = Input.ConfirmPassword;
+        Input.Password = Input.ConfirmPassword = ""; // never send a password back to the browser
+
+        if (!Input.Agree) { _error = "Tick the box to agree to how your details are kept."; return; }
+        if (password != confirm) { _error = "The two PINs or passwords don't match."; return; }
+
+        try
+        {
+            var (business, owner) = Businesses.Register(new BusinessSignUp
+            {
+                BusinessName = Input.BusinessName, Size = Input.Size, Town = Input.Town, Phone = Input.Phone, Email = Input.Email,
+                Tpin = Input.Tpin, OwnerName = Input.OwnerName, Username = Input.Username, Password = password,
+                SampleProducts = Input.SampleProducts,
+            });
+            await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                UserClaims.ToPrincipal(owner, business.Id, CookieAuthenticationDefaults.AuthenticationScheme));
+            HttpContext.Response.Cookies.Append("WavePOS.Business", business.Code, new CookieOptions
+            {
+                HttpOnly = true, SameSite = SameSiteMode.Lax, Secure = HttpContext.Request.IsHttps, Expires = DateTimeOffset.Now.AddYears(1),
+            });
+            Navigation.NavigateTo("/start?new=1", forceLoad: true);
+        }
+        catch (ArgumentException ex) { _error = ex.Message; }
+    }
+
+    private sealed class SignUpInput
+    {
+        public string BusinessName { get; set; } = "";
+        public string Town { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Tpin { get; set; } = "";
+        public BusinessSize Size { get; set; } = BusinessSize.Informal;
+        public string OwnerName { get; set; } = "";
+        public string Username { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string ConfirmPassword { get; set; } = "";
+        public bool SampleProducts { get; set; }
+        public bool Agree { get; set; }
+    }
+}

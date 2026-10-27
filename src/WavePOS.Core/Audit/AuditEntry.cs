@@ -69,6 +69,8 @@ public static class AuditActions
     public const string PasswordReset = "staff.password_reset";
 
     public const string SettingsChanged = "settings.changed";
+    public const string BusinessCreated = "settings.business_created";
+    public const string ModulesChanged = "settings.modules";
 
     public const string AccountCreated = "books.account_created";
     public const string AccountUpdated = "books.account_updated";

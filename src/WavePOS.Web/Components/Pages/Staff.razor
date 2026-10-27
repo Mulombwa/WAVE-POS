@@ -1,5 +1,5 @@
 @page "/staff"
-@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ManageStaff))]
+@attribute [Authorize(Policy = nameof(Permission.ManageStaff))]
 @rendermode InteractiveServer
 @inject UserRepository Users
 
@@ -10,12 +10,19 @@
         <h1>Staff</h1>
         <button type="button" class="btn primary" @onclick="StartAdd">Add staff member</button>
     </div>
-    <p class="muted">
-        <strong>Cashier</strong>: sell and look up customers.
-        <strong>Supervisor</strong>: also refunds, stock adjustments and customer edits.
-        <strong>Manager</strong>: everything, including staff, settings and the audit trail.
-        <strong>Accountant / bookkeeper</strong>: the books, financial reports, bank reconciliation and the audit trail, but not the till.
-    </p>
+
+    <details class="card roles-help">
+        <summary>What each role can do</summary>
+        <table class="data">
+            <tbody>
+                @foreach (var r in Permissions.Ordered)
+                {
+                    <tr><th>@r.Label()</th><td>@r.Description()</td></tr>
+                }
+            </tbody>
+        </table>
+        <p class="muted small">Roles only reach the modules your business has switched on. Only a super admin can add or change admins and super admins.</p>
+    </details>
 
     @if (_message is not null) { <div class="alert @(_messageIsError ? "error" : "success")" role="status">@_message</div> }
 
@@ -28,7 +35,10 @@
                 <label class="field"><span>Username</span><input @bind="_editing.Username" disabled="@(_editing.Id != 0)" autocomplete="off" /></label>
                 <label class="field">
                     <span>Role</span>
-                    <select @bind="_editing.Role">@foreach (var r in Enum.GetValues<UserRole>()) { <option value="@r">@r.Label()</option> }</select>
+                    <select @bind="_editing.Role">
+                        @foreach (var r in Permissions.Ordered.Where(r => _role.CanAssign(r))) { <option value="@r">@r.Label()</option> }
+                    </select>
+                    <span class="muted small">@_editing.Role.Description()</span>
                 </label>
                 <label class="field"><span>Employee number</span><input @bind="_editing.EmployeeCode" /></label>
                 <label class="field"><span>Phone</span><input type="tel" @bind="_editing.Phone" /></label>
@@ -53,7 +63,7 @@
     {
         <section class="card">
             <h2>New PIN for @_resetting.DisplayName</h2>
-            <p class="muted">Give it to them in person. They can't be signed in by anyone else's PIN.</p>
+            <p class="muted">Give it to them in person.</p>
             <label class="field"><span>New PIN or password</span><input type="password" @bind="_password" autocomplete="new-password" /></label>
             <div class="actions-row">
                 <button type="button" class="btn" @onclick="() => _resetting = null">Cancel</button>
@@ -66,19 +76,22 @@
         <table class="data">
             <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Employee no.</th><th>Phone</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
             <tbody>
-                @foreach (var u in _users)
+                @foreach (var u in _users.OrderBy(u => Permissions.Ordered.ToList().IndexOf(u.Role)).ThenBy(u => u.DisplayName))
                 {
                     <tr class="@(u.IsActive ? "" : "inactive")">
                         <td>@u.DisplayName</td>
                         <td class="mono">@u.Username</td>
-                        <td>@u.Role.Label()</td>
+                        <td><span class="badge @(u.Role.IsAdminLevel() ? "info" : "")">@u.Role.Label()</span></td>
                         <td>@u.EmployeeCode</td>
                         <td>@u.Phone</td>
                         <td>@(u.IsActive ? "Active" : "Disabled")</td>
                         <td>@(u.LastLogin?.ToString("dd MMM yyyy HH:mm") ?? "Never")</td>
                         <td class="row-actions">
-                            <button type="button" class="btn small" @onclick="() => Edit(u)">Edit</button>
-                            <button type="button" class="btn small" @onclick="() => StartReset(u)">Reset PIN</button>
+                            @if (_role.CanAssign(u.Role))
+                            {
+                                <button type="button" class="btn small" @onclick="() => Edit(u)">Edit</button>
+                                <button type="button" class="btn small" @onclick="() => StartReset(u)">Reset PIN</button>
+                            }
                         </td>
                     </tr>
                 }
@@ -90,13 +103,18 @@
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
 
+    private UserRole _role;
     private List<User> _users = [];
     private User? _editing, _resetting;
     private string _password = "";
     private string? _message;
     private bool _messageIsError;
 
-    protected override void OnInitialized() => _users = Users.GetAll();
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        _users = Users.GetAll();
+    }
 
     private void StartAdd() { _resetting = null; _password = ""; _editing = new User { Role = UserRole.Cashier }; }
 
@@ -117,8 +135,8 @@
         try
         {
             var actor = (await AuthState).User.ToActor();
-            if (_editing!.Id == 0) Users.Create(_editing, _password, actor);
-            else Users.Update(_editing, actor);
+            if (_editing!.Id == 0) Users.Create(_editing, _password, actor, _role);
+            else Users.Update(_editing, actor, _role);
             (_message, _messageIsError) = ($"Saved {_editing.DisplayName}.", false);
             _editing = null;
             _password = "";
@@ -134,12 +152,12 @@
     {
         try
         {
-            Users.ResetPassword(_resetting!.Id, _password, (await AuthState).User.ToActor());
+            Users.ResetPassword(_resetting!.Id, _password, (await AuthState).User.ToActor(), _role);
             (_message, _messageIsError) = ($"New PIN set for {_resetting.DisplayName}.", false);
             _resetting = null;
             _password = "";
         }
-        catch (ArgumentException ex)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
             (_message, _messageIsError) = (ex.Message, true);
         }

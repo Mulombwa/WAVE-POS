@@ -24,9 +24,9 @@ public sealed class OrderDataTests : IDisposable
         _sell = new SalesOrderRepository(_db);
         _ledger = new LedgerRepository(_db);
         var users = new UserRepository(_db);
-        _ann = ActorFor(users.Create("ann", "Ann Phiri", "4321", UserRole.Manager));
-        _ben = ActorFor(users.Create("ben", "Ben Zulu", "4321", UserRole.Manager));
-        _sam = ActorFor(users.Create("sam", "Sam Mwale", "4321", UserRole.Supervisor));
+        _ann = ActorFor(users.Create("ann", "Ann Phiri", "4321", UserRole.Admin));
+        _ben = ActorFor(users.Create("ben", "Ben Zulu", "4321", UserRole.Admin));
+        _sam = ActorFor(users.Create("sam", "Sam Mwale", "4321", UserRole.OperationsManager));
     }
 
     private static Actor ActorFor(User u) => new(u.Id, u.DisplayName);
@@ -105,7 +105,8 @@ public sealed class OrderDataTests : IDisposable
 
         var line = _buy.GetOrder(po)!.Lines[0];
         Assert.Throws<InvalidOperationException>(() => _buy.Receive(po, new Dictionary<long, int> { [line.Id] = 1 }, "", _sam));
-        Assert.Contains("aren't allowed", Assert.Throws<InvalidOperationException>(() => _buy.Approve(po, _sam)).Message);
+        var clerk = ActorFor(new UserRepository(_db).Create("wes", "Wes Tembo", "4321", UserRole.Warehousing));
+        Assert.Contains("aren't allowed", Assert.Throws<InvalidOperationException>(() => _buy.Approve(po, clerk)).Message);
         Assert.Contains("another manager", Assert.Throws<InvalidOperationException>(() => _buy.Approve(po, _ann)).Message);
 
         _buy.Approve(po, _ben);
@@ -118,7 +119,9 @@ public sealed class OrderDataTests : IDisposable
     [Fact]
     public void The_only_manager_can_approve_their_own_order_and_it_is_flagged()
     {
-        new UserRepository(_db).Update(new User { Id = _ben.UserId!.Value, Username = "ben", DisplayName = "Ben Zulu", Role = UserRole.Manager, IsActive = false }, _ann);
+        new UserRepository(_db).Update(new User { Id = _ben.UserId!.Value, Username = "ben", DisplayName = "Ben Zulu", Role = UserRole.Admin, IsActive = false }, _ann);
+        // Operations managers can approve purchase orders too, so Sam has to be out of the picture as well.
+        new UserRepository(_db).Update(new User { Id = _sam.UserId!.Value, Username = "sam", DisplayName = "Sam Mwale", Role = UserRole.Sales }, _ann);
         _buy.SetApprovalLimit(0m, _ann);
         var po = _buy.CreateOrder(Supplier(), null, "", [new PoLineInput(Product("GRO-004").Id, 1, 40m)], _ann);
         Assert.Equal(PurchaseOrderStatus.AwaitingApproval, _buy.Submit(po, _ann));
