@@ -1,0 +1,43 @@
+@* From/to date pickers with quick periods. Zambia's tax year is the calendar year. *@
+<div class="filters">
+    @if (!SingleDate)
+    {
+        <label class="field inline"><span>From</span><input type="date" value="@From.ToString("yyyy-MM-dd")" @onchange="e => Set(e, true)" /></label>
+    }
+    <label class="field inline"><span>@(SingleDate ? "As at" : "To")</span><input type="date" value="@To.ToString("yyyy-MM-dd")" @onchange="e => Set(e, false)" /></label>
+    <div class="chips">
+        @if (SingleDate)
+        {
+            <button type="button" class="chip" @onclick="() => Changed.InvokeAsync((From, Today))">Today</button>
+            <button type="button" class="chip" @onclick="() => Changed.InvokeAsync((From, MonthStart.AddDays(-1)))">End of last month</button>
+            <button type="button" class="chip" @onclick="() => Changed.InvokeAsync((From, new DateOnly(Today.Year - 1, 12, 31)))">End of last year</button>
+        }
+        else
+        {
+            <button type="button" class="chip" @onclick="() => Changed.InvokeAsync((MonthStart, Today))">This month</button>
+            <button type="button" class="chip" @onclick="() => Changed.InvokeAsync((MonthStart.AddMonths(-1), MonthStart.AddDays(-1)))">Last month</button>
+            <button type="button" class="chip" @onclick="() => Changed.InvokeAsync((new DateOnly(Today.Year, 1, 1), Today))">This year</button>
+            <button type="button" class="chip" @onclick="() => Changed.InvokeAsync((new DateOnly(Today.Year - 1, 1, 1), new DateOnly(Today.Year - 1, 12, 31)))">Last year</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public DateOnly From { get; set; }
+    [Parameter] public DateOnly To { get; set; }
+
+    /// <summary>Just an "as at" date (balance sheet, trial balance).</summary>
+    [Parameter] public bool SingleDate { get; set; }
+
+    [Parameter] public EventCallback<(DateOnly From, DateOnly To)> Changed { get; set; }
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+    private static DateOnly MonthStart => new(Today.Year, Today.Month, 1);
+
+    private Task Set(ChangeEventArgs e, bool from)
+    {
+        if (!DateOnly.TryParseExact(e.Value?.ToString(), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var d)) return Task.CompletedTask;
+        return Changed.InvokeAsync(from ? (d, To) : (From, d));
+    }
+}

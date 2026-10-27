@@ -1,0 +1,218 @@
+@page "/accounting/reports"
+@attribute [Authorize(Policy = nameof(Permission.ViewAccounts))]
+@rendermode InteractiveServer
+@using System.Text
+@inject LedgerRepository Ledger
+@inject SettingsRepository Settings
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>@Title · WAVE POS</PageTitle>
+
+<div class="page">
+    <AccountingNav />
+    <div class="tabs no-print" role="tablist">
+        @foreach (var (key, label) in Reports)
+        {
+            <button type="button" role="tab" aria-selected="@(_report == key)" class="tab @(_report == key ? "active" : "")" @onclick="() => Open(key)">@label</button>
+        }
+    </div>
+
+    <div class="no-print">
+        <DateRange From="_from" To="_to" SingleDate="@(_report is "bs" or "tb")" Changed="r => { (_from, _to) = r; Load(); }" />
+        <div class="actions-row">
+            <button type="button" class="btn" @onclick="DownloadCsv">Download CSV</button>
+            <button type="button" class="btn outline" @onclick="Print">Print</button>
+        </div>
+    </div>
+
+    <section class="card report">
+        <header class="report-head">
+            <strong>@_business.Name</strong>
+            @if (!string.IsNullOrWhiteSpace(_business.Tpin)) { <span>TPIN @_business.Tpin</span> }
+            <h1>@Title</h1>
+            <span class="muted">@Period</span>
+        </header>
+
+        @switch (_report)
+        {
+            case "bs":
+                <table class="data report-table">
+                    @Section(_bs.Assets, "Total assets")
+                    @Section(_bs.Liabilities, "Total liabilities")
+                    <tbody>
+                        <tr class="section"><th colspan="2">Equity</th></tr>
+                        @foreach (var r in _bs.Equity.Rows) { @Row(r) }
+                        <tr><td>Profit to date (not yet moved to retained earnings)</td><td class="num">@Money.Format(_bs.ProfitToDate)</td></tr>
+                        <tr class="subtotal"><th>Total equity</th><th class="num">@Money.Format(_bs.TotalEquity)</th></tr>
+                    </tbody>
+                    <tfoot>
+                        <tr class="grand"><th>Liabilities + equity</th><th class="num">@Money.Format(_bs.LiabilitiesAndEquity)</th></tr>
+                    </tfoot>
+                </table>
+                <p class="check-line @(_bs.Balances ? "ok" : "bad")">@(_bs.Balances ? "✓ Assets equal liabilities plus equity." : "✗ The balance sheet doesn't balance. Please contact support.")</p>
+                break;
+
+            case "tb":
+                <table class="data report-table">
+                    <thead><tr><th>Code</th><th>Account</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _tb.Rows)
+                        {
+                            <tr>
+                                <td class="mono">@r.Account.Code</td>
+                                <td><a href="/accounting/accounts/@r.Account.Id">@r.Account.Name</a></td>
+                                <td class="num">@(r.Debit > 0 ? Money.Format(r.Debit) : "")</td>
+                                <td class="num">@(r.Credit > 0 ? Money.Format(r.Credit) : "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot><tr class="grand"><th colspan="2">Totals</th><th class="num">@Money.Format(_tb.TotalDebit)</th><th class="num">@Money.Format(_tb.TotalCredit)</th></tr></tfoot>
+                </table>
+                <p class="check-line @(_tb.Balances ? "ok" : "bad")">@(_tb.Balances ? "✓ Debits equal credits." : "✗ Debits and credits differ. Please contact support.")</p>
+                break;
+
+            case "vat":
+                <table class="data report-table">
+                    <tbody>
+                        <tr class="section"><th colspan="2">Sales (from the till, less refunds, excluding VAT)</th></tr>
+                        <tr><td>Standard-rated sales (16%)</td><td class="num">@Money.Format(_vat.StandardRatedSales)</td></tr>
+                        <tr><td>Zero-rated and exempt sales</td><td class="num">@Money.Format(_vat.ZeroRatedSales)</td></tr>
+                        <tr class="section"><th colspan="2">VAT (from the books)</th></tr>
+                        <tr><td>Output VAT charged on sales</td><td class="num">@Money.Format(_vat.OutputVat)</td></tr>
+                        <tr><td>Less input VAT paid on purchases</td><td class="num">@Money.Format(-_vat.InputVat)</td></tr>
+                    </tbody>
+                    <tfoot>
+                        <tr class="grand"><th>@(_vat.NetPayable >= 0 ? "VAT to pay ZRA" : "VAT to claim back from ZRA")</th><th class="num">@Money.Format(Math.Abs(_vat.NetPayable))</th></tr>
+                    </tfoot>
+                </table>
+                <p class="muted small">
+                    Figures to help fill in your VAT return on ZRA's TaxOnline. Input VAT only includes purchases recorded with VAT
+                    (bank lines posted "incl. VAT", or journals to VAT input). Keep tax invoices for every input VAT claim.
+                    When the return is filed, lock the books up to the end of the period on the Overview page.
+                </p>
+                break;
+
+            default:
+                <table class="data report-table">
+                    @Section(_pl.Income, "Total income")
+                    @Section(_pl.CostOfSales, "Total cost of sales")
+                    <tbody><tr class="subtotal"><th>Gross profit@(_pl.GrossMargin is { } m ? $" ({m:P1})" : "")</th><th class="num">@Money.Format(_pl.GrossProfit)</th></tr></tbody>
+                    @Section(_pl.Expenses, "Total expenses")
+                    <tfoot><tr class="grand"><th>@(_pl.NetProfit >= 0 ? "Net profit" : "Net loss")</th><th class="num">@Money.Format(_pl.NetProfit)</th></tr></tfoot>
+                </table>
+                break;
+        }
+        <footer class="report-foot muted">Prepared @DateTime.Now.ToString("dd MMM yyyy HH:mm") with WAVE POS</footer>
+    </section>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "r")] public string? ReportQuery { get; set; }
+
+    private static readonly (string Key, string Label)[] Reports =
+        [("pl", "Profit & loss"), ("bs", "Balance sheet"), ("tb", "Trial balance"), ("vat", "VAT return")];
+
+    private string _report = "pl";
+    private DateOnly _from = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateOnly _to = DateOnly.FromDateTime(DateTime.Today);
+    private BusinessProfile _business = new();
+    private ProfitAndLoss _pl = default!;
+    private BalanceSheet _bs = default!;
+    private TrialBalance _tb = default!;
+    private VatSummary _vat = default!;
+
+    private string Title => Reports.First(r => r.Key == _report).Label;
+    private string Period => _report is "bs" or "tb"
+        ? $"As at {_to:dd MMMM yyyy}"
+        : $"{_from:dd MMMM yyyy} to {_to:dd MMMM yyyy}";
+
+    protected override void OnInitialized()
+    {
+        _business = Settings.GetBusinessProfile();
+        if (Reports.Any(r => r.Key == ReportQuery)) _report = ReportQuery!;
+        Load();
+    }
+
+    private void Open(string key)
+    {
+        _report = key;
+        Navigation.NavigateTo($"/accounting/reports?r={key}", replace: true);
+        Load();
+    }
+
+    private void Load()
+    {
+        switch (_report)
+        {
+            case "bs": _bs = Ledger.BalanceSheet(_to); break;
+            case "tb": _tb = Ledger.TrialBalance(_to); break;
+            case "vat": _vat = Ledger.Vat(_from, _to); break;
+            default: _pl = Ledger.ProfitAndLoss(_from, _to); break;
+        }
+    }
+
+    private RenderFragment Row(ReportRow r) => @<tr>
+        <td><a href="/accounting/accounts/@r.Account.Id"><span class="mono muted">@r.Account.Code</span> @r.Account.Name</a></td>
+        <td class="num">@Money.Format(r.Amount)</td>
+    </tr>;
+
+    private RenderFragment Section(ReportSection s, string totalLabel) => @<tbody>
+        <tr class="section"><th colspan="2">@s.Title</th></tr>
+        @foreach (var r in s.Rows) { @Row(r) }
+        @if (s.Rows.Count == 0) { <tr><td class="muted" colspan="2">None</td></tr> }
+        <tr class="subtotal"><th>@totalLabel</th><th class="num">@Money.Format(s.Total)</th></tr>
+    </tbody>;
+
+    private async Task Print() => await JS.InvokeVoidAsync("print");
+
+    private async Task DownloadCsv()
+    {
+        var csv = new StringBuilder();
+        csv.AppendLine(Csv.Escape(_business.Name));
+        csv.AppendLine(Csv.Escape($"{Title} — {Period}"));
+        csv.AppendLine();
+
+        void WriteSection(ReportSection s, string total)
+        {
+            csv.AppendLine(Csv.Escape(s.Title));
+            foreach (var r in s.Rows) csv.AppendLine($"{Csv.Escape(r.Account.Code)},{Csv.Escape(r.Account.Name)},{Csv.Amount(r.Amount)}");
+            csv.AppendLine($",{Csv.Escape(total)},{Csv.Amount(s.Total)}");
+        }
+
+        switch (_report)
+        {
+            case "bs":
+                csv.AppendLine("code,account,amount");
+                WriteSection(_bs.Assets, "Total assets");
+                WriteSection(_bs.Liabilities, "Total liabilities");
+                WriteSection(_bs.Equity, "Equity accounts");
+                csv.AppendLine($",Profit to date,{Csv.Amount(_bs.ProfitToDate)}");
+                csv.AppendLine($",Liabilities + equity,{Csv.Amount(_bs.LiabilitiesAndEquity)}");
+                break;
+            case "tb":
+                csv.AppendLine("code,account,debit,credit");
+                foreach (var r in _tb.Rows) csv.AppendLine($"{Csv.Escape(r.Account.Code)},{Csv.Escape(r.Account.Name)},{Csv.Amount(r.Debit)},{Csv.Amount(r.Credit)}");
+                csv.AppendLine($",Totals,{Csv.Amount(_tb.TotalDebit)},{Csv.Amount(_tb.TotalCredit)}");
+                break;
+            case "vat":
+                csv.AppendLine("item,amount");
+                csv.AppendLine($"Standard-rated sales (16%) excl. VAT,{Csv.Amount(_vat.StandardRatedSales)}");
+                csv.AppendLine($"Zero-rated and exempt sales,{Csv.Amount(_vat.ZeroRatedSales)}");
+                csv.AppendLine($"Output VAT,{Csv.Amount(_vat.OutputVat)}");
+                csv.AppendLine($"Input VAT,{Csv.Amount(_vat.InputVat)}");
+                csv.AppendLine($"Net VAT payable (negative = refund),{Csv.Amount(_vat.NetPayable)}");
+                break;
+            default:
+                csv.AppendLine("code,account,amount");
+                WriteSection(_pl.Income, "Total income");
+                WriteSection(_pl.CostOfSales, "Total cost of sales");
+                csv.AppendLine($",Gross profit,{Csv.Amount(_pl.GrossProfit)}");
+                WriteSection(_pl.Expenses, "Total expenses");
+                csv.AppendLine($",Net profit,{Csv.Amount(_pl.NetProfit)}");
+                break;
+        }
+        var file = $"{Title.Replace(" & ", "-and-").Replace(' ', '-').ToLowerInvariant()}-{(_report is "bs" or "tb" ? "" : $"{_from:yyyyMMdd}-")}{_to:yyyyMMdd}.csv";
+        await JS.InvokeVoidAsync("wavePos.download", file, "text/csv", csv.ToString());
+    }
+}

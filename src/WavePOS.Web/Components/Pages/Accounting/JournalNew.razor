@@ -1,0 +1,122 @@
+@page "/accounting/journals/new"
+@attribute [Authorize(Policy = nameof(Permission.ManageAccounts))]
+@rendermode InteractiveServer
+@inject LedgerRepository Ledger
+@inject NavigationManager Navigation
+
+<PageTitle>New journal · WAVE POS</PageTitle>
+
+<div class="page">
+    <AccountingNav />
+    <h1>New journal</h1>
+    <p class="muted">
+        For entries the till doesn't make: owner's capital, loans, wages, depreciation, corrections, opening balances.
+        Debits must equal credits. Once posted, a journal can only be reversed, not edited.
+    </p>
+
+    <section class="card">
+        @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+        <div class="three-col">
+            <label class="field"><span>Date</span><input type="date" @bind="_date" min="@MinDate" /></label>
+            <label class="field"><span>Reference (optional)</span><input @bind="_reference" placeholder="e.g. invoice or receipt number" /></label>
+            <label class="field"><span>What is it for?</span><input @bind="_memo" placeholder="e.g. Owner's capital paid in" /></label>
+        </div>
+        @if (_lockDate is { } locked) { <p class="muted">The books are locked up to @locked.ToString("dd MMM yyyy").</p> }
+
+        <div class="table-wrap">
+            <table class="data journal-lines">
+                <thead><tr><th>Account</th><th>Line description</th><th class="num">Debit</th><th class="num">Credit</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var line in _lines)
+                    {
+                        <tr>
+                            <td>
+                                <select @bind="line.AccountId" aria-label="Account">
+                                    <option value="0">Choose an account…</option>
+                                    @foreach (var group in _accounts.GroupBy(a => a.Type))
+                                    {
+                                        <optgroup label="@group.Key.Plural()">
+                                            @foreach (var a in group) { <option value="@a.Id">@a.Display</option> }
+                                        </optgroup>
+                                    }
+                                </select>
+                            </td>
+                            <td><input @bind="line.Description" aria-label="Line description" /></td>
+                            <td class="num"><input class="money-input" type="number" min="0" step="0.01" @bind="line.Debit" @bind:event="oninput" aria-label="Debit" /></td>
+                            <td class="num"><input class="money-input" type="number" min="0" step="0.01" @bind="line.Credit" @bind:event="oninput" aria-label="Credit" /></td>
+                            <td><button type="button" class="btn outline small" disabled="@(_lines.Count <= 2)" @onclick="() => _lines.Remove(line)" aria-label="Remove line">✕</button></td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <th><button type="button" class="btn outline small" @onclick="() => _lines.Add(new())">Add line</button></th>
+                        <th class="num">Totals</th>
+                        <th class="num">@Money.Format(TotalDebit)</th>
+                        <th class="num">@Money.Format(TotalCredit)</th>
+                        <th></th>
+                    </tr>
+                    @if (TotalDebit != TotalCredit)
+                    {
+                        <tr><td colspan="5" class="num out-of-balance">Out of balance by @Money.Format(Math.Abs(TotalDebit - TotalCredit))</td></tr>
+                    }
+                </tfoot>
+            </table>
+        </div>
+
+        <div class="actions-row">
+            <a class="btn outline" href="/accounting/journals">Cancel</a>
+            <button type="button" class="btn primary" disabled="@(TotalDebit == 0 || TotalDebit != TotalCredit)" @onclick="Post">Post journal</button>
+        </div>
+    </section>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private sealed class LineInput
+    {
+        public long AccountId { get; set; }
+        public string Description { get; set; } = "";
+        public decimal? Debit { get; set; }
+        public decimal? Credit { get; set; }
+    }
+
+    private List<Account> _accounts = [];
+    private List<LineInput> _lines = [new(), new()];
+    private DateOnly _date = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly? _lockDate;
+    private string _reference = "", _memo = "";
+    private string? _error;
+
+    private decimal TotalDebit => _lines.Sum(l => l.Debit ?? 0);
+    private decimal TotalCredit => _lines.Sum(l => l.Credit ?? 0);
+    private string? MinDate => _lockDate?.AddDays(1).ToString("yyyy-MM-dd");
+
+    protected override void OnInitialized()
+    {
+        _accounts = Ledger.Accounts(includeInactive: false);
+        _lockDate = Ledger.LockDate();
+    }
+
+    private async Task Post()
+    {
+        _error = null;
+        var used = _lines.Where(l => l.AccountId != 0 || (l.Debit ?? 0) != 0 || (l.Credit ?? 0) != 0).ToList();
+        try
+        {
+            var id = Ledger.PostJournal(new JournalDraft
+            {
+                Date = _date,
+                Reference = _reference,
+                Memo = _memo,
+                Lines = used.Select(l => new JournalLineDraft(l.AccountId, l.Debit ?? 0, l.Credit ?? 0, l.Description)).ToList(),
+            }, (await AuthState).User.ToActor());
+            Navigation.NavigateTo($"/accounting/journals/{id}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _error = ex.Message;
+        }
+    }
+}

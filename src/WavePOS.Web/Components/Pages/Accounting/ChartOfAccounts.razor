@@ -1,0 +1,133 @@
+@page "/accounting/accounts"
+@attribute [Authorize(Policy = nameof(Permission.ViewAccounts))]
+@rendermode InteractiveServer
+@inject LedgerRepository Ledger
+
+<PageTitle>Chart of accounts · WAVE POS</PageTitle>
+
+<div class="page">
+    <AccountingNav />
+    <div class="page-head">
+        <h1>Chart of accounts</h1>
+        @if (_canManage) { <button type="button" class="btn primary" @onclick="StartAdd">Add account</button> }
+    </div>
+    <p class="muted">
+        Balances to today. Accounts marked <span class="badge info">Auto</span> are posted to by the till and stock screens.
+        Expense accounts numbered 5000–5999 count as cost of sales.
+    </p>
+    <div class="filters">
+        <label class="check inline"><input type="checkbox" @bind="_showInactive" /> Show switched-off accounts</label>
+    </div>
+
+    @foreach (var type in Enum.GetValues<AccountType>())
+    {
+        var rows = _balances.Where(b => b.Account.Type == type && (_showInactive || b.Account.IsActive)).ToList();
+        <section class="card">
+            <h2>@type.Plural()</h2>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Code</th><th>Name</th><th>About</th><th class="num">Balance</th>@if (_canManage) { <th></th> }</tr></thead>
+                    <tbody>
+                        @foreach (var b in rows)
+                        {
+                            <tr class="@(b.Account.IsActive ? "" : "inactive")">
+                                <td class="mono">@b.Account.Code</td>
+                                <td>
+                                    <a href="/accounting/accounts/@b.Account.Id">@b.Account.Name</a>
+                                    @if (b.Account.IsSystem) { <span class="badge info">Auto</span> }
+                                    @if (b.Account.IsBank) { <span class="badge">Bank</span> }
+                                    @if (!b.Account.IsActive) { <span class="badge">Off</span> }
+                                </td>
+                                <td class="muted">@b.Account.Description</td>
+                                <td class="num">@Money.Format(b.Balance)</td>
+                                @if (_canManage) { <td class="row-actions"><button type="button" class="btn outline small" @onclick="() => StartEdit(b.Account)">Edit</button></td> }
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot><tr><th colspan="3">Total @type.Plural().ToLowerInvariant()</th><th class="num">@Money.Format(rows.Sum(r => r.Balance))</th>@if (_canManage) { <th></th> }</tr></tfoot>
+                </table>
+            </div>
+        </section>
+    }
+</div>
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="Cancel"></div>
+    <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="account-title">
+        <h2 id="account-title">@(_editing.Id == 0 ? "Add account" : $"Edit {_editing.Code}")</h2>
+        @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+        <div class="two-col">
+            <label class="field"><span>Code</span><input @bind="_editing.Code" placeholder="e.g. 6100" /></label>
+            <label class="field">
+                <span>Type</span>
+                <select @bind="_editing.Type" disabled="@(_editing.IsSystem)">
+                    @foreach (var t in Enum.GetValues<AccountType>()) { <option value="@t">@t</option> }
+                </select>
+            </label>
+        </div>
+        <label class="field"><span>Name</span><input @bind="_editing.Name" placeholder="e.g. Security services" /></label>
+        <label class="field"><span>Description (optional)</span><input @bind="_editing.Description" /></label>
+        @if (_editing.Type == AccountType.Asset)
+        {
+            <label class="check"><input type="checkbox" @bind="_editing.IsBank" /> Bank account or mobile-money wallet (statements can be imported)</label>
+        }
+        @if (_editing.Id != 0 && !_editing.IsSystem)
+        {
+            <label class="check"><input type="checkbox" @bind="_editing.IsActive" /> Switched on (can be posted to)</label>
+        }
+        <div class="modal-actions">
+            <button type="button" class="btn outline" @onclick="Cancel">Cancel</button>
+            <button type="button" class="btn primary" @onclick="Save">Save</button>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private List<AccountBalance> _balances = [];
+    private bool _canManage, _showInactive;
+    private Account? _editing;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = (await AuthState).User.ToUser().Role.Can(Permission.ManageAccounts);
+        Load();
+    }
+
+    private void Load() => _balances = Ledger.Balances(null, DateOnly.FromDateTime(DateTime.Today));
+
+    private void StartAdd() { _error = null; _editing = new Account { Type = AccountType.Expense }; }
+
+    private void StartEdit(Account a)
+    {
+        _error = null;
+        _editing = new Account
+        {
+            Id = a.Id, Code = a.Code, Name = a.Name, Type = a.Type, SystemKey = a.SystemKey,
+            IsBank = a.IsBank, IsActive = a.IsActive, Description = a.Description,
+        };
+    }
+
+    private void Cancel() => _editing = null;
+
+    private async Task Save()
+    {
+        if (_editing is null) return;
+        _error = null;
+        try
+        {
+            var actor = (await AuthState).User.ToActor();
+            if (_editing.Id == 0) Ledger.CreateAccount(_editing, actor);
+            else Ledger.UpdateAccount(_editing, actor);
+            _editing = null;
+            Load();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _error = ex.Message;
+        }
+    }
+}

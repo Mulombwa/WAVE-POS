@@ -1,0 +1,81 @@
+@page "/accounting/journals"
+@attribute [Authorize(Policy = nameof(Permission.ViewAccounts))]
+@rendermode InteractiveServer
+@inject LedgerRepository Ledger
+
+<PageTitle>Journals · WAVE POS</PageTitle>
+
+<div class="page">
+    <AccountingNav />
+    <div class="page-head">
+        <h1>Journals</h1>
+        @if (_canManage) { <a class="btn primary" href="/accounting/journals/new">New journal</a> }
+    </div>
+    <p class="muted">Every entry in the books. Posted journals can't be edited or deleted; to correct one, open it and reverse it.</p>
+
+    <DateRange From="_from" To="_to" Changed="r => { (_from, _to) = r; _page = 1; Load(); }" />
+    <div class="filters">
+        <input type="search" placeholder="Search number, reference or details…" @bind="Search" @bind:event="oninput" aria-label="Search journals" />
+        <select @bind="SourceFilter" aria-label="Type">
+            <option value="">All types</option>
+            @foreach (var s in Enum.GetValues<JournalSource>()) { <option value="@s">@s.Label()</option> }
+        </select>
+    </div>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>No.</th><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th class="num">Amount</th><th>By</th></tr></thead>
+            <tbody>
+                @foreach (var j in _entries)
+                {
+                    <tr class="@(j.ReversedById is not null ? "inactive" : "")">
+                        <td><a class="mono" href="/accounting/journals/@j.Id">@j.Number</a></td>
+                        <td class="nowrap">@j.Date.ToString("dd MMM yyyy")</td>
+                        <td><span class="badge @(j.Source == JournalSource.Reversal ? "warn" : j.Source == JournalSource.Manual ? "info" : "")">@j.Source.Label()</span></td>
+                        <td>@j.Reference</td>
+                        <td>@j.Memo @if (j.ReversedById is { } r) { <span class="badge warn">Reversed by J@(r.ToString("D6"))</span> }</td>
+                        <td class="num">@Money.Format(j.Amount)</td>
+                        <td>@j.UserName</td>
+                    </tr>
+                }
+                @if (_entries.Count == 0) { <tr><td colspan="7" class="muted empty">No journals match.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+    <div class="pager">
+        <span class="muted">@_total journal(s)</span>
+        <div>
+            <button type="button" class="btn outline small" disabled="@(_page <= 1)" @onclick="() => Go(-1)">Previous</button>
+            <button type="button" class="btn outline small" disabled="@(_page * PageSize >= _total)" @onclick="() => Go(1)">Next</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    private const int PageSize = 50;
+
+    private List<JournalSummary> _entries = [];
+    private int _total, _page = 1;
+    private bool _canManage;
+    private DateOnly _from = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateOnly _to = DateOnly.FromDateTime(DateTime.Today);
+    private string _search = "", _source = "";
+
+    private string Search { get => _search; set { _search = value; _page = 1; Load(); } }
+    private string SourceFilter { get => _source; set { _source = value; _page = 1; Load(); } }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = (await AuthState).User.ToUser().Role.Can(Permission.ManageAccounts);
+        Load();
+    }
+
+    private void Load()
+    {
+        var source = Enum.TryParse<JournalSource>(_source, out var s) ? s : (JournalSource?)null;
+        (_entries, _total) = Ledger.Journals(new JournalFilter(_from, _to, source, _search), _page, PageSize);
+    }
+
+    private void Go(int delta) { _page += delta; Load(); }
+}

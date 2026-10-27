@@ -12,7 +12,10 @@
         <AuthorizeView>
             <Authorized>
                 <nav class="topnav" aria-label="Main">
-                    <NavLink href="/" Match="NavLinkMatch.All">Till</NavLink>
+                    @if (context.User.ToUser().Role.Can(Permission.Sell))
+                    {
+                        <NavLink href="/" Match="NavLinkMatch.All">Till</NavLink>
+                    }
                     @foreach (var (href, label, permission) in Sections)
                     {
                         @if (context.User.ToUser().Role.Can(permission))
@@ -21,7 +24,7 @@
                         }
                     }
                 </nav>
-                <span class="who">@context.User.Identity?.Name · @context.User.ToUser().Role</span>
+                <span class="who">@context.User.Identity?.Name · @context.User.ToUser().Role.Label()</span>
                 <form method="post" action="/logout" class="logout">
                     <AntiforgeryToken />
                     <button type="submit" class="btn outline small">Log out</button>
@@ -50,6 +53,7 @@
         ("/inventory", "Inventory", Permission.ViewInventory),
         ("/customers", "Customers", Permission.ViewCustomers),
         ("/returns", "Returns", Permission.ProcessReturns),
+        ("/accounting", "Accounts", Permission.ViewAccounts),
         ("/staff", "Staff", Permission.ManageStaff),
         ("/audit", "Audit trail", Permission.ViewAuditLog),
         ("/settings", "Settings", Permission.ManageSettings),

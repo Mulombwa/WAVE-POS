@@ -10,8 +10,9 @@ public static class Money
     public static decimal Round(decimal amount) =>
         Math.Round(amount, 2, MidpointRounding.AwayFromZero);
 
+    /// <summary>K1,234.50; negative amounts as -K25.00.</summary>
     public static string Format(decimal amount) =>
-        $"{Symbol}{Round(amount).ToString("N2", CultureInfo.InvariantCulture)}";
+        (amount < 0 ? "-" : "") + $"{Symbol}{Math.Abs(Round(amount)).ToString("N2", CultureInfo.InvariantCulture)}";
 
     /// <summary>Converts to whole ngwee for exact storage in the database.</summary>
     public static long ToNgwee(decimal amount) => (long)(Round(amount) * 100);

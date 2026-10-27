@@ -175,7 +175,10 @@ public class ProductRepository(PosDatabase db)
             ids.Add(id);
 
             if (request.OpeningStock > 0)
+            {
                 InventoryRepository.ApplyMovement(conn, tx, id, request.OpeningStock, StockReason.InitialStock, "Opening stock", null, actor);
+                InventoryRepository.PostStock(conn, tx, GetById(conn, tx, id)!, StockReason.InitialStock, request.OpeningStock, request.Cost, actor);
+            }
         }
 
         AuditRepository.Write(conn, tx, actor, AuditActions.ProductCreated, "product", ids[0].ToString(CultureInfo.InvariantCulture),
@@ -222,6 +225,13 @@ public class ProductRepository(PosDatabase db)
         {
             throw new ArgumentException("That barcode is already used by another product.");
         }
+
+        // Keep the Inventory account equal to the stock value at cost.
+        if (before.Cost != product.Cost)
+            LedgerRepository.PostAutomatic(conn, tx, Core.Accounting.PostingRules.Revaluation(product.Id, product.Name.Trim(),
+                DateOnly.FromDateTime(DateTime.Today), Math.Max(before.StockQuantity, 0) * (product.Cost - before.Cost),
+                $"cost {Money.Format(before.Cost)} → {Money.Format(product.Cost)} on {before.StockQuantity} in stock",
+                LedgerRepository.SystemAccountLookup(conn, tx)), actor);
 
         var changes = new List<string>();
         if (before.Name != product.Name.Trim()) changes.Add($"name \"{before.Name}\" → \"{product.Name.Trim()}\"");

@@ -16,7 +16,7 @@
             <button type="button" class="btn" @onclick="DownloadCsv">Download CSV</button>
         </div>
     </div>
-    <p class="muted">Every sign-in, sale, refund, stock change, price change, customer data access and settings change. Entries can't be edited or deleted.</p>
+    <p class="muted">Every sign-in, sale, refund, stock change, price change, customer data access, journal, bank reconciliation and settings change. Entries can't be edited or deleted.</p>
 
     @if (_verification is not null)
     {
@@ -34,6 +34,8 @@
             <option value="customer.">Customers (personal data)</option>
             <option value="staff.">Staff</option>
             <option value="settings.">Settings</option>
+            <option value="books.">Accounts &amp; journals</option>
+            <option value="bank.">Bank reconciliation</option>
         </select>
         <input type="search" placeholder="Search details or person…" @bind="Search" @bind:event="oninput" aria-label="Search" />
         <label class="field inline"><span>From</span><input type="date" @bind="From" /></label>

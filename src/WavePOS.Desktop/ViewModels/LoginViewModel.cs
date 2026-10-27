@@ -95,6 +95,9 @@ public class LoginViewModel : ObservableObject
 
         switch (result.Status)
         {
+            case LoginStatus.Success when !result.User!.Can(Permission.Sell):
+                ErrorMessage = "This account can't use the till. Accountants sign in to the web portal.";
+                break;
             case LoginStatus.Success:
                 ErrorMessage = "";
                 LoggedIn?.Invoke(result.User!);

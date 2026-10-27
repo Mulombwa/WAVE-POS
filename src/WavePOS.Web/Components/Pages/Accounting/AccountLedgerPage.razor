@@ -1,0 +1,84 @@
+@page "/accounting/accounts/{Id:long}"
+@attribute [Authorize(Policy = nameof(Permission.ViewAccounts))]
+@rendermode InteractiveServer
+@using System.Text
+@inject LedgerRepository Ledger
+@inject IJSRuntime JS
+
+<PageTitle>@(_ledger?.Account.Name ?? "Account") · WAVE POS</PageTitle>
+
+<div class="page">
+    <AccountingNav />
+    @if (_ledger is null)
+    {
+        <h1>Account not found</h1>
+        <a href="/accounting/accounts">Back to the chart of accounts</a>
+    }
+    else
+    {
+        <div class="page-head">
+            <h1><span class="mono">@_ledger.Account.Code</span> @_ledger.Account.Name</h1>
+            <button type="button" class="btn" @onclick="DownloadCsv">Download CSV</button>
+        </div>
+        <p class="muted">@_ledger.Account.Type · @(_ledger.Account.Type.IsDebitNormal() ? "increases with debits" : "increases with credits")
+            @if (_ledger.Account.Description.Length > 0) { <span> · @_ledger.Account.Description</span> }</p>
+
+        <DateRange From="_from" To="_to" Changed="r => { (_from, _to) = r; Load(); }" />
+
+        <div class="table-wrap card">
+            <table class="data">
+                <thead><tr><th>Date</th><th>Journal</th><th>Details</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+                <tbody>
+                    <tr class="muted"><td>@_from.ToString("dd MMM yyyy")</td><td></td><td>Opening balance</td><td></td><td></td><td class="num">@Money.Format(_ledger.OpeningBalance)</td></tr>
+                    @foreach (var l in _ledger.Lines)
+                    {
+                        <tr>
+                            <td class="nowrap">@l.Date.ToString("dd MMM yyyy")</td>
+                            <td><a class="mono" href="/accounting/journals/@l.EntryId">J@(l.EntryId.ToString("D6"))</a></td>
+                            <td>@l.Reference<span class="muted"> · @(l.Description.Length > 0 ? l.Description : l.Memo)</span></td>
+                            <td class="num">@(l.Debit > 0 ? Money.Format(l.Debit) : "")</td>
+                            <td class="num">@(l.Credit > 0 ? Money.Format(l.Credit) : "")</td>
+                            <td class="num">@Money.Format(l.RunningBalance)</td>
+                        </tr>
+                    }
+                    @if (_ledger.Lines.Count == 0) { <tr><td colspan="6" class="muted empty">Nothing posted in these dates.</td></tr> }
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <th colspan="3">Closing balance @_to.ToString("dd MMM yyyy")</th>
+                        <th class="num">@Money.Format(_ledger.Lines.Sum(l => l.Debit))</th>
+                        <th class="num">@Money.Format(_ledger.Lines.Sum(l => l.Credit))</th>
+                        <th class="num">@Money.Format(_ledger.ClosingBalance)</th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private AccountLedger? _ledger;
+    private DateOnly _from = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateOnly _to = DateOnly.FromDateTime(DateTime.Today);
+
+    protected override void OnParametersSet() => Load();
+
+    private void Load()
+    {
+        try { _ledger = Ledger.Ledger(Id, _from, _to); }
+        catch (InvalidOperationException) { _ledger = null; }
+    }
+
+    private async Task DownloadCsv()
+    {
+        if (_ledger is null) return;
+        var csv = new StringBuilder("date,journal,reference,details,debit,credit,balance\n");
+        csv.AppendLine($"{_from:yyyy-MM-dd},,,Opening balance,,,{Csv.Amount(_ledger.OpeningBalance)}");
+        foreach (var l in _ledger.Lines)
+            csv.AppendLine(string.Join(",", l.Date.ToString("yyyy-MM-dd"), $"J{l.EntryId:D6}", Csv.Escape(l.Reference),
+                Csv.Escape(l.Description.Length > 0 ? l.Description : l.Memo), Csv.Amount(l.Debit), Csv.Amount(l.Credit), Csv.Amount(l.RunningBalance)));
+        await JS.InvokeVoidAsync("wavePos.download", $"ledger-{_ledger.Account.Code}-{_from:yyyyMMdd}-{_to:yyyyMMdd}.csv", "text/csv", csv.ToString());
+    }
+}

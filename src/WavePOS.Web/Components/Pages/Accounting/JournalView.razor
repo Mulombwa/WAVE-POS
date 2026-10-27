@@ -1,0 +1,126 @@
+@page "/accounting/journals/{Id:long}"
+@attribute [Authorize(Policy = nameof(Permission.ViewAccounts))]
+@rendermode InteractiveServer
+@inject LedgerRepository Ledger
+@inject NavigationManager Navigation
+
+<PageTitle>@(_entry?.Summary.Number ?? "Journal") · WAVE POS</PageTitle>
+
+<div class="page">
+    <AccountingNav />
+    @if (_entry is null)
+    {
+        <h1>Journal not found</h1>
+        <a href="/accounting/journals">Back to journals</a>
+    }
+    else
+    {
+        var s = _entry.Summary;
+        <div class="page-head">
+            <h1>Journal <span class="mono">@s.Number</span> <span class="badge">@s.Source.Label()</span></h1>
+            <a class="btn outline" href="/accounting/journals">All journals</a>
+        </div>
+
+        <section class="card">
+            <dl class="facts">
+                <dt>Date</dt><dd>@s.Date.ToString("dddd dd MMMM yyyy")</dd>
+                <dt>Reference</dt><dd>@(s.Reference.Length > 0 ? s.Reference : "–")</dd>
+                <dt>Details</dt><dd>@s.Memo</dd>
+                <dt>Posted by</dt><dd>@s.UserName on @_entry.CreatedAt.ToString("dd MMM yyyy HH:mm")</dd>
+                @if (SourceLink(s) is { } link)
+                {
+                    <dt>Came from</dt><dd><a href="@link.Href" target="@(link.NewTab ? "_blank" : null)">@link.Text</a></dd>
+                }
+                @if (s.ReversedById is { } rev)
+                {
+                    <dt>Reversed</dt><dd><a href="/accounting/journals/@rev">by J@(rev.ToString("D6"))</a></dd>
+                }
+            </dl>
+
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Account</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in _entry.Lines)
+                        {
+                            <tr>
+                                <td><a href="/accounting/accounts/@l.AccountId"><span class="mono">@l.AccountCode</span> @l.AccountName</a></td>
+                                <td>@l.Description</td>
+                                <td class="num">@(l.Debit > 0 ? Money.Format(l.Debit) : "")</td>
+                                <td class="num">@(l.Credit > 0 ? Money.Format(l.Credit) : "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot><tr><th colspan="2">Totals</th><th class="num">@Money.Format(_entry.Lines.Sum(l => l.Debit))</th><th class="num">@Money.Format(_entry.Lines.Sum(l => l.Credit))</th></tr></tfoot>
+                </table>
+            </div>
+        </section>
+
+        @if (_canManage && s.ReversedById is null && s.Source != JournalSource.Reversal)
+        {
+            <section class="card">
+                <h2>Reverse this journal</h2>
+                @if (s.Source.IsAutomatic())
+                {
+                    <p class="muted">
+                        This entry was posted automatically by @(s.Source == JournalSource.Stock ? "a stock change. To undo it, adjust the stock" : "the till. To undo it, process a refund").
+                        That way the books and the shop floor stay in step.
+                    </p>
+                }
+                else
+                {
+                    <p class="muted">Posts an equal and opposite entry, so the original stays on record and its effect is cancelled.@(s.Source == JournalSource.Bank ? " The bank statement line goes back to the to-do list." : "")</p>
+                    @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+                    <div class="lookup">
+                        <label class="field"><span>Reversal date</span><input type="date" @bind="_reverseDate" /></label>
+                        <label class="field grow"><span>Reason</span><input @bind="_reason" @bind:event="oninput" placeholder="e.g. Posted to the wrong account" /></label>
+                        <button type="button" class="btn danger-solid" disabled="@string.IsNullOrWhiteSpace(_reason)" @onclick="Reverse">Reverse</button>
+                    </div>
+                }
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public long Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private JournalEntryView? _entry;
+    private bool _canManage;
+    private DateOnly _reverseDate = DateOnly.FromDateTime(DateTime.Today);
+    private string _reason = "";
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canManage = (await AuthState).User.ToUser().Role.Can(Permission.ManageAccounts);
+        _entry = Ledger.GetEntry(Id);
+        _error = null;
+        _reason = "";
+    }
+
+    private static (string Href, string Text, bool NewTab)? SourceLink(JournalSummary s) => (s.Source, s.SourceId) switch
+    {
+        (JournalSource.Sale, { } id) => ($"/documents/receipt/{id}", $"Sale receipt #{long.Parse(id):D6}", true),
+        (JournalSource.Return, { } id) => ($"/documents/refund/{id}", $"Refund slip R{long.Parse(id):D6}", true),
+        (JournalSource.Stock, { } id) => ($"/inventory/{id}", "Product stock history", false),
+        (JournalSource.Bank, _) => ("/accounting/bank", "Bank reconciliation", false),
+        (JournalSource.Reversal, { } id) => ($"/accounting/journals/{id}", $"Reverses J{long.Parse(id):D6}", false),
+        _ => null,
+    };
+
+    private async Task Reverse()
+    {
+        _error = null;
+        try
+        {
+            var id = Ledger.Reverse(Id, _reverseDate, _reason, (await AuthState).User.ToActor());
+            Navigation.NavigateTo($"/accounting/journals/{id}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _error = ex.Message;
+        }
+    }
+}

@@ -1,11 +1,13 @@
 namespace WavePOS.Core.Models;
 
-/// <summary>Roles, lowest to highest. What each role may do is defined in <see cref="Security.Permissions"/>.</summary>
+/// <summary>Staff roles. What each role may do is defined in <see cref="Security.Permissions"/>.</summary>
 public enum UserRole
 {
     Cashier,
     Supervisor,
     Manager,
+    /// <summary>Accountant or bookkeeper: the books, reports and bank reconciliation, but not the till.</summary>
+    Accountant,
 }
 
 /// <summary>A staff member who can log in. The password hash is never loaded into this object.</summary>
