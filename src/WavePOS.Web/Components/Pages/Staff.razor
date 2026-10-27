@@ -14,6 +14,7 @@
         <strong>Cashier</strong>: sell and look up customers.
         <strong>Supervisor</strong>: also refunds, stock adjustments and customer edits.
         <strong>Manager</strong>: everything, including staff, settings and the audit trail.
+        <strong>Accountant / bookkeeper</strong>: the books, financial reports, bank reconciliation and the audit trail, but not the till.
     </p>
 
     @if (_message is not null) { <div class="alert @(_messageIsError ? "error" : "success")" role="status">@_message</div> }
@@ -27,7 +28,7 @@
                 <label class="field"><span>Username</span><input @bind="_editing.Username" disabled="@(_editing.Id != 0)" autocomplete="off" /></label>
                 <label class="field">
                     <span>Role</span>
-                    <select @bind="_editing.Role">@foreach (var r in Enum.GetValues<UserRole>()) { <option value="@r">@r</option> }</select>
+                    <select @bind="_editing.Role">@foreach (var r in Enum.GetValues<UserRole>()) { <option value="@r">@r.Label()</option> }</select>
                 </label>
                 <label class="field"><span>Employee number</span><input @bind="_editing.EmployeeCode" /></label>
                 <label class="field"><span>Phone</span><input type="tel" @bind="_editing.Phone" /></label>
@@ -70,7 +71,7 @@
                     <tr class="@(u.IsActive ? "" : "inactive")">
                         <td>@u.DisplayName</td>
                         <td class="mono">@u.Username</td>
-                        <td>@u.Role</td>
+                        <td>@u.Role.Label()</td>
                         <td>@u.EmployeeCode</td>
                         <td>@u.Phone</td>
                         <td>@(u.IsActive ? "Active" : "Disabled")</td>

@@ -1,0 +1,339 @@
+@page "/accounting/bank"
+@attribute [Authorize(Policy = nameof(Permission.ViewAccounts))]
+@rendermode InteractiveServer
+@inject BankRepository Bank
+@inject LedgerRepository Ledger
+
+<PageTitle>Bank reconciliation · WAVE POS</PageTitle>
+
+<div class="page">
+    <AccountingNav />
+    <div class="page-head">
+        <h1>Bank reconciliation</h1>
+        <select class="account-picker" @bind="AccountId" aria-label="Bank account">
+            @foreach (var a in _banks) { <option value="@a.Id">@a.Display</option> }
+        </select>
+    </div>
+    <p class="muted">
+        Import a statement from your bank or mobile-money wallet, then explain each line: match it to an entry already in the books,
+        or post it to an account (bank charges, rent, a supplier payment…). Mark a bank or wallet in the chart of accounts to see it here.
+    </p>
+
+    @if (_summary is not null)
+    {
+        <div class="stat-grid">
+            <div class="stat"><span>Balance in the books</span><strong>@Money.Format(_summary.LedgerBalance)</strong></div>
+            <div class="stat"><span>Statement balance@(_summary.StatementDate is { } d ? $" ({d:dd MMM})" : "")</span><strong>@(_summary.StatementBalance is { } sb ? Money.Format(sb) : "–")</strong></div>
+            <button type="button" class="stat @(_summary.UnmatchedCount > 0 ? "warn" : "") @(_tab == Tab.ToDo ? "active" : "")" @onclick="() => Show(Tab.ToDo)">
+                <span>Statement lines to do</span><strong>@_summary.UnmatchedCount</strong>
+            </button>
+            <button type="button" class="stat @(_tab == Tab.BooksOnly ? "active" : "")" @onclick="() => Show(Tab.BooksOnly)">
+                <span>In the books, not on the statement</span><strong>@_summary.UnreconciledLedgerCount</strong>
+            </button>
+        </div>
+        @if (_summary.StatementBalance is { } statement)
+        {
+            var difference = statement - (_summary.LedgerBalance + _summary.UnmatchedTotal - _summary.UnreconciledLedgerTotal);
+            <div class="alert @(difference == 0 ? "success" : "warn") recon-check" role="status">
+                <span>Books @Money.Format(_summary.LedgerBalance) + lines to do @Money.Format(_summary.UnmatchedTotal) − entries not on the statement @Money.Format(_summary.UnreconciledLedgerTotal)
+                    = @Money.Format(statement - difference).</span>
+                @if (difference == 0)
+                {
+                    <strong>Agrees with the statement.@(_summary.UnmatchedCount == 0 ? " Fully reconciled." : "")</strong>
+                }
+                else
+                {
+                    <strong>Differs from the statement by @Money.Format(difference).</strong>
+                    <span>If this is money that was in the account before you started using WAVE POS, post it as an opening balance journal
+                        (debit this account, credit Opening balances).</span>
+                }
+            </div>
+        }
+    }
+
+    @if (_canManage && _summary is not null)
+    {
+        <section class="card">
+            <h2>Import a statement</h2>
+            <p class="muted">
+                Download your statement as a CSV file from online banking or your wallet app. Columns are found by their headings:
+                a date, a description (or narration/details), and either an amount or separate debit and credit columns.
+                Importing the same statement twice is safe: lines already imported are skipped.
+            </p>
+            <div class="import-row">
+                <label class="btn file-btn">
+                    Choose CSV file…
+                    <InputFile OnChange="OnFile" accept=".csv,text/csv,text/plain" />
+                </label>
+                <span class="muted">@(_fileName ?? "or paste the statement below")</span>
+            </div>
+            <textarea class="paste" rows="4" @bind="_pasted" @bind:event="oninput" placeholder="@PasteExample" aria-label="Paste a statement"></textarea>
+            <div class="actions-row">
+                <button type="button" class="btn primary" disabled="@(string.IsNullOrWhiteSpace(_pasted) && _fileText is null)" @onclick="Import">Import</button>
+            </div>
+            @if (_importError is not null) { <div class="alert error" role="alert">@_importError</div> }
+            @if (_importResult is { } r)
+            {
+                <div class="alert success" role="status">
+                    Imported @r.Imported line(s) for @r.From?.ToString("dd MMM yyyy")–@r.To?.ToString("dd MMM yyyy").
+                    @if (r.Duplicates > 0) { <span>@r.Duplicates were already imported and skipped.</span> }
+                    @if (r.Skipped > 0) { <span>@r.Skipped row(s) without a date or amount (balances, totals) were ignored.</span> }
+                </div>
+            }
+        </section>
+    }
+
+    @if (_message is not null) { <div class="alert @(_messageIsError ? "error" : "success")" role="status">@_message</div> }
+
+    <div class="tabs" role="tablist">
+        @foreach (var (tab, label) in Tabs)
+        {
+            <button type="button" role="tab" aria-selected="@(_tab == tab)" class="tab @(_tab == tab ? "active" : "")" @onclick="() => Show(tab)">@label</button>
+        }
+    </div>
+
+    @if (_tab == Tab.BooksOnly)
+    {
+        <p class="muted">Money the books say went in or out of this account that no statement line explains yet, e.g. cash banked late in the day. It should appear on the next statement.</p>
+        <div class="table-wrap card">
+            <table class="data">
+                <thead><tr><th>Date</th><th>Journal</th><th>Details</th><th class="num">Amount</th></tr></thead>
+                <tbody>
+                    @foreach (var e in _booksOnly)
+                    {
+                        <tr>
+                            <td class="nowrap">@e.Date.ToString("dd MMM yyyy")</td>
+                            <td><a class="mono" href="/accounting/journals/@e.EntryId">J@(e.EntryId.ToString("D6"))</a></td>
+                            <td>@e.Reference · @e.Memo</td>
+                            <td class="num @(e.Amount < 0 ? "money-out" : "money-in")">@Money.Format(e.Amount)</td>
+                        </tr>
+                    }
+                    @if (_booksOnly.Count == 0) { <tr><td colspan="4" class="muted empty">Everything in the books is on a statement.</td></tr> }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <div class="table-wrap card">
+            <table class="data bank-lines">
+                <thead>
+                    <tr>
+                        <th>Date</th><th>Description</th><th class="num">Amount</th>
+                        <th>@(_tab == Tab.ToDo ? "Explain it" : _tab == Tab.Matched ? "In the books as" : "Reason")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var line in _lines)
+                    {
+                        <tr>
+                            <td class="nowrap">@line.Date.ToString("dd MMM yyyy")</td>
+                            <td>@line.Description @if (line.Reference.Length > 0) { <span class="muted mono ref">@line.Reference</span> }</td>
+                            <td class="num @(line.Amount < 0 ? "money-out" : "money-in")">@Money.Format(line.Amount)</td>
+                            <td>
+                                @if (_tab == Tab.ToDo && _canManage)
+                                {
+                                    var input = InputFor(line.Id);
+                                    <div class="explain">
+                                        @if (line.Suggestion is { } m)
+                                        {
+                                            <button type="button" class="btn small primary" @onclick="() => Match(line, m)"
+                                                    title="@m.Reference · @m.Memo">Match J@(m.EntryId.ToString("D6")) · @m.Date.ToString("dd MMM")</button>
+                                            <span class="muted">or</span>
+                                        }
+                                        <select @bind="input.AccountId" aria-label="Post to account">
+                                            <option value="0">Post to account…</option>
+                                            @foreach (var group in _accounts.Where(a => a.Id != _accountId).GroupBy(a => a.Type))
+                                            {
+                                                <optgroup label="@group.Key.Plural()">
+                                                    @foreach (var a in group) { <option value="@a.Id">@a.Display</option> }
+                                                </optgroup>
+                                            }
+                                        </select>
+                                        <label class="check inline" title="Split out 16% VAT (16/116 of the amount)"><input type="checkbox" @bind="input.IncludesVat" /> incl. VAT</label>
+                                        <button type="button" class="btn small" disabled="@(input.AccountId == 0)" @onclick="() => Post(line)">Post</button>
+                                        <button type="button" class="btn small outline" @onclick="() => StartExclude(line)">Exclude</button>
+                                    </div>
+                                }
+                                else if (_tab == Tab.ToDo)
+                                {
+                                    <span class="muted">@(line.Suggestion is { } m ? $"Looks like J{m.EntryId:D6}" : "Not yet in the books")</span>
+                                }
+                                else if (_tab == Tab.Matched && line.JournalEntryId is { } j)
+                                {
+                                    <a class="mono" href="/accounting/journals/@j">J@(j.ToString("D6"))</a>
+                                    @if (_canManage) { <button type="button" class="btn small outline" @onclick="() => Reopen(line)">Undo</button> }
+                                }
+                                else
+                                {
+                                    <span>@line.Note</span>
+                                    @if (_canManage) { <button type="button" class="btn small outline" @onclick="() => Reopen(line)">Put back</button> }
+                                }
+                            </td>
+                        </tr>
+                    }
+                    @if (_lines.Count == 0)
+                    {
+                        <tr><td colspan="4" class="muted empty">@(_tab == Tab.ToDo ? "Nothing to do. Import a statement to reconcile." : "No lines here.")</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (_excluding is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _excluding = null"></div>
+    <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="exclude-title">
+        <h2 id="exclude-title">Exclude this line?</h2>
+        <p>@_excluding.Date.ToString("dd MMM yyyy") · @_excluding.Description · @Money.Format(_excluding.Amount)</p>
+        <p class="muted">Use this for lines that aren't real transactions, e.g. a bank error and its correction. It stays on record with your reason.</p>
+        <label class="field"><span>Reason</span><input @bind="_excludeReason" @bind:event="oninput" /></label>
+        <div class="modal-actions">
+            <button type="button" class="btn outline" @onclick="() => _excluding = null">Cancel</button>
+            <button type="button" class="btn primary" disabled="@string.IsNullOrWhiteSpace(_excludeReason)" @onclick="Exclude">Exclude</button>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "account")] public long? AccountQuery { get; set; }
+
+    private enum Tab { ToDo, Matched, Excluded, BooksOnly }
+    private static readonly (Tab, string)[] Tabs =
+        [(Tab.ToDo, "To do"), (Tab.Matched, "Reconciled"), (Tab.Excluded, "Excluded"), (Tab.BooksOnly, "In the books only")];
+
+    private const string PasteExample = "Date,Description,Debit,Credit,Balance\n27/10/2026,Card settlement,,2320.00,3320.00";
+
+    private sealed class LineInput { public long AccountId { get; set; } public bool IncludesVat { get; set; } }
+
+    private List<Account> _banks = [], _accounts = [];
+    private long _accountId;
+    private ReconciliationSummary? _summary;
+    private Tab _tab = Tab.ToDo;
+    private List<BankLineView> _lines = [];
+    private List<LedgerCandidate> _booksOnly = [];
+    private readonly Dictionary<long, LineInput> _inputs = [];
+    private bool _canManage;
+
+    private string? _fileName, _fileText, _importError;
+    private string _pasted = "";
+    private BankImportResult? _importResult;
+    private string? _message;
+    private bool _messageIsError;
+    private BankLineView? _excluding;
+    private string _excludeReason = "";
+
+    private long AccountId
+    {
+        get => _accountId;
+        set { _accountId = value; _importResult = null; _message = null; _inputs.Clear(); Load(); }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = (await AuthState).User.ToUser().Role.Can(Permission.ManageAccounts);
+        _banks = Bank.BankAccounts();
+        _accounts = Ledger.Accounts(includeInactive: false);
+        _accountId = _banks.FirstOrDefault(b => b.Id == AccountQuery)?.Id ?? _banks.FirstOrDefault()?.Id ?? 0;
+        Load();
+    }
+
+    private void Load()
+    {
+        if (_accountId == 0) { _summary = null; _lines = []; return; }
+        _summary = Bank.Summary(_accountId);
+        _booksOnly = _tab == Tab.BooksOnly ? Bank.UnreconciledEntries(_accountId) : [];
+        _lines = _tab switch
+        {
+            Tab.ToDo => Bank.Lines(_accountId, BankLineStatus.Unmatched),
+            Tab.Matched => Bank.Lines(_accountId, BankLineStatus.Matched),
+            Tab.Excluded => Bank.Lines(_accountId, BankLineStatus.Excluded),
+            _ => [],
+        };
+    }
+
+    private void Show(Tab tab) { _tab = tab; Load(); }
+
+    private LineInput InputFor(long lineId) => _inputs.TryGetValue(lineId, out var i) ? i : _inputs[lineId] = new LineInput();
+
+    private async Task OnFile(InputFileChangeEventArgs e)
+    {
+        _importError = null;
+        _importResult = null;
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024));
+            _fileText = await reader.ReadToEndAsync();
+            _fileName = e.File.Name;
+            _pasted = "";
+        }
+        catch (IOException)
+        {
+            _importError = "That file is too big. Statements up to 5 MB can be imported.";
+        }
+    }
+
+    private async Task Import()
+    {
+        _importError = null;
+        _importResult = null;
+        try
+        {
+            var text = _fileText ?? _pasted;
+            _importResult = Bank.Import(_accountId, _fileText is null ? "Pasted statement" : _fileName ?? "statement.csv", text,
+                (await AuthState).User.ToActor());
+            _fileText = _fileName = null;
+            _pasted = "";
+            _tab = Tab.ToDo;
+            Load();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _importError = ex.Message;
+        }
+    }
+
+    private Task Match(BankLineView line, LedgerCandidate match) =>
+        Act(actor => Bank.Match(line.Id, match.EntryId, actor), $"Matched to J{match.EntryId:D6}.");
+
+    private Task Post(BankLineView line)
+    {
+        var input = InputFor(line.Id);
+        return Act(actor =>
+        {
+            var id = Bank.Categorise(line.Id, input.AccountId, input.IncludesVat, "", actor);
+            _message = $"Posted as J{id:D6}.";
+        }, null);
+    }
+
+    private void StartExclude(BankLineView line) { _excluding = line; _excludeReason = ""; }
+
+    private async Task Exclude()
+    {
+        var line = _excluding!;
+        _excluding = null;
+        await Act(actor => Bank.Exclude(line.Id, _excludeReason, actor), "Line excluded.");
+    }
+
+    private Task Reopen(BankLineView line) => Act(actor => Bank.Reopen(line.Id, actor), "Line moved back to the to-do list.");
+
+    private async Task Act(Action<WavePOS.Core.Audit.Actor> action, string? done)
+    {
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            action((await AuthState).User.ToActor());
+            if (done is not null) _message = done;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _message = ex.Message;
+            _messageIsError = true;
+        }
+        Load();
+    }
+}

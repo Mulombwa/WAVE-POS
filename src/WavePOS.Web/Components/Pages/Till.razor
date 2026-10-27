@@ -1,5 +1,5 @@
 @page "/"
-@attribute [Authorize]
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.Sell))]
 @rendermode InteractiveServer
 @using System.Globalization
 @inject ProductRepository Products

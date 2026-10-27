@@ -45,8 +45,9 @@ Then open http://localhost:5254. It works on PCs, tablets and phones.
 | **Inventory** | Everyone can view; supervisors adjust; managers edit | Products with variants (e.g. Size × Colour, each with its own SKU and stock), cost and margin, reorder levels, low/out-of-stock alerts, stock value. Receive stock (weighted-average cost), adjust (damaged, expired, theft) and stock counts. Every change is in the stock ledger. |
 | **Customers** | Everyone can look up; supervisors edit; managers handle data requests | Customer profiles, purchase history, visits and spend. Marketing consent is recorded with a date. Attach a customer to a sale at the till. |
 | **Returns** | Supervisors and managers | Refund all or part of a sale by receipt number, choose whether items go back in stock, print a refund slip. Can't refund more than was sold. Exchanges = refund + new sale. |
-| **Staff** | Managers | Unlimited users. Roles: Cashier, Supervisor, Manager. Employee details, disable accounts, reset PINs. At least one manager must stay active. |
-| **Audit trail** | Managers | Sign-ins (incl. failed and lockouts), sales, refunds, stock and price changes, customer data access/exports, staff and settings changes. Append-only and hash-chained, with an integrity check and CSV export. |
+| **Staff** | Managers | Unlimited users. Roles: Cashier, Supervisor, Manager, Accountant / bookkeeper. Employee details, disable accounts, reset PINs. At least one manager must stay active. |
+| **Audit trail** | Managers, accountants | Sign-ins (incl. failed and lockouts), sales, refunds, stock and price changes, customer data access/exports, journals, bank reconciliation, staff and settings changes. Append-only and hash-chained, with an integrity check and CSV export. |
+| **Accounts** | Managers, accountants | Double-entry books, see below. |
 
 ### Data protection (Zambia Data Protection Act 2021)
 
@@ -54,11 +55,32 @@ Then open http://localhost:5254. It works on PCs, tablets and phones.
 - Every view, change, export and anonymisation of a customer's data is in the audit trail.
 - **Export** gives a customer a copy of their data (JSON). **Anonymise** removes their personal details but keeps the sales for tax records.
 
+## Accounting (web portal)
+
+Double-entry books that fill themselves from the shop. Accountants and bookkeepers get their own role: they see the books, reports, inventory, customers and the audit trail, but not the till or staff settings. The desktop till refuses accountant sign-ins.
+
+- **Chart of accounts**: a starting chart for a Zambian VAT-registered retailer (cash, bank, mobile money, card clearing, inventory, VAT input/output, payables, equity, sales, cost of sales, stock losses and common expenses). Add your own accounts and mark bank accounts or wallets. Expense accounts numbered 5000–5999 count as cost of sales.
+- **Automatic postings**, in the same transaction as the shop activity:
+  - Sale: cash, card or mobile money in; sales (excl. VAT) and VAT output; cost of sales out of inventory.
+  - Refund: the reverse, with restocked items back into inventory at the cost they were sold at.
+  - Stock received: inventory owed to the supplier. Damaged, expired, stolen and stock-count differences go to stock losses. Cost-price changes revalue stock on hand.
+  - The Inventory account always equals the stock value at cost (tests check this).
+  - When the books start, the stock already on hand is posted as an opening balance. Sales from before the upgrade are not posted.
+- **Journals**: post manual journals (wages, loans, depreciation, opening balances). Debits must equal credits. Posted journals can't be edited or deleted (database triggers): correct them with a reversal. Till and stock entries are undone by refunding or adjusting stock instead.
+- **Lock date**: after filing VAT or closing a month, lock the books so nothing can be posted on or before that date.
+- **Bank reconciliation**: import a bank or mobile-money statement as CSV (upload or paste). Columns are found by their headings (Date, Description/Narration/Details, Amount or Debit + Credit, Reference, Balance) and dates are read day-first. Re-importing the same file skips lines already imported. For each line:
+  - match it to an entry already in the books (suggested automatically: same amount, within a week);
+  - post it to an account, optionally splitting out 16% VAT; or
+  - exclude it with a reason.
+  - A check shows whether the books agree with the statement balance.
+- **Reports**: profit & loss, balance sheet, trial balance and a VAT summary for the ZRA return (standard-rated and zero-rated sales, output and input VAT). Each has CSV download and print. Each account has a ledger with a running balance.
+- **Bank feeds**: live feeds need a bank or aggregator partner. Statement import works today, and a feed can plug into the same import (`BankRepository.ImportLines`).
+
 ## Roadmap
 
 1. ✅ Retail core: staff & roles, audit trail, inventory & variants, customers, returns.
-2. Central server sync: desktop tills share the web portal's data and work offline.
-3. Accounting: chart of accounts, double-entry books from sales/refunds/stock, accountant & bookkeeper views, bank statement import and reconciliation (live bank feeds need a bank/aggregator partner).
+2. ✅ Accounting: chart of accounts, double-entry books from sales/refunds/stock, accountant & bookkeeper views, bank statement import and reconciliation.
+3. Central server sync: desktop tills share the web portal's data and work offline.
 4. Reports & analytics: sales by day/product/staff/customer, margins, seasonal trends, stock turnover.
 5. Hardware: ESC/POS receipt printers and cash drawers, barcode scanners, card terminals and mobile money (provider to be chosen).
 

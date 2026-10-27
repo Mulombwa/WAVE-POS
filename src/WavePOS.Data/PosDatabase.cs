@@ -125,10 +125,106 @@ public class PosDatabase
         AddColumnIfMissing(conn, "users", "employee_code", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(conn, "users", "phone", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(conn, "users", "email", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(conn, "sale_lines", "unit_cost_ngwee", "INTEGER NOT NULL DEFAULT 0");
 
         CreateRetailTables(conn);
+        CreateAccountingTables(conn);
 
         if (seedSampleProducts) SeedSampleProducts(conn);
+
+        // Start the books: chart of accounts plus the stock already on hand as an opening balance.
+        LedgerRepository.StartBooks(conn);
+    }
+
+    /// <summary>
+    /// Double-entry books. Journal entries and lines can't be changed or deleted (database
+    /// triggers): mistakes are corrected with a reversing entry, as accountants expect.
+    /// </summary>
+    private static void CreateAccountingTables(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS accounts (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                code         TEXT    NOT NULL UNIQUE,
+                name         TEXT    NOT NULL,
+                type         TEXT    NOT NULL,
+                system_key   TEXT    UNIQUE,
+                is_bank      INTEGER NOT NULL DEFAULT 0,
+                is_active    INTEGER NOT NULL DEFAULT 1,
+                description  TEXT    NOT NULL DEFAULT '',
+                created_at   TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS journal_entries (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                date         TEXT    NOT NULL,
+                reference    TEXT    NOT NULL DEFAULT '',
+                memo         TEXT    NOT NULL DEFAULT '',
+                source       TEXT    NOT NULL,
+                source_id    TEXT,
+                reverses_id  INTEGER REFERENCES journal_entries(id),
+                user_id      INTEGER,
+                user_name    TEXT    NOT NULL,
+                created_at   TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_journal_date ON journal_entries(date);
+            CREATE INDEX IF NOT EXISTS ix_journal_source ON journal_entries(source, source_id);
+            -- An entry can only be reversed once.
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_journal_reverses ON journal_entries(reverses_id) WHERE reverses_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS journal_lines (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_id      INTEGER NOT NULL REFERENCES journal_entries(id),
+                account_id    INTEGER NOT NULL REFERENCES accounts(id),
+                debit_ngwee   INTEGER NOT NULL DEFAULT 0,
+                credit_ngwee  INTEGER NOT NULL DEFAULT 0,
+                description   TEXT    NOT NULL DEFAULT '',
+                CHECK (debit_ngwee >= 0 AND credit_ngwee >= 0 AND (debit_ngwee = 0) <> (credit_ngwee = 0))
+            );
+            CREATE INDEX IF NOT EXISTS ix_journal_lines_account ON journal_lines(account_id);
+            CREATE INDEX IF NOT EXISTS ix_journal_lines_entry ON journal_lines(entry_id);
+
+            CREATE TRIGGER IF NOT EXISTS journal_entries_no_update BEFORE UPDATE ON journal_entries
+            BEGIN SELECT RAISE(ABORT, 'Posted journals cannot be changed. Post a reversal instead.'); END;
+            CREATE TRIGGER IF NOT EXISTS journal_entries_no_delete BEFORE DELETE ON journal_entries
+            BEGIN SELECT RAISE(ABORT, 'Posted journals cannot be deleted. Post a reversal instead.'); END;
+            CREATE TRIGGER IF NOT EXISTS journal_lines_no_update BEFORE UPDATE ON journal_lines
+            BEGIN SELECT RAISE(ABORT, 'Posted journals cannot be changed. Post a reversal instead.'); END;
+            CREATE TRIGGER IF NOT EXISTS journal_lines_no_delete BEFORE DELETE ON journal_lines
+            BEGIN SELECT RAISE(ABORT, 'Posted journals cannot be deleted. Post a reversal instead.'); END;
+
+            -- Imported bank and mobile-money statements, for reconciliation.
+            CREATE TABLE IF NOT EXISTS bank_imports (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id       INTEGER NOT NULL REFERENCES accounts(id),
+                file_name        TEXT    NOT NULL,
+                imported_at      TEXT    NOT NULL,
+                user_name        TEXT    NOT NULL,
+                line_count       INTEGER NOT NULL,
+                duplicate_count  INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS bank_lines (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id        INTEGER NOT NULL REFERENCES accounts(id),
+                import_id         INTEGER REFERENCES bank_imports(id),
+                date              TEXT    NOT NULL,
+                description       TEXT    NOT NULL,
+                reference         TEXT    NOT NULL DEFAULT '',
+                amount_ngwee      INTEGER NOT NULL,
+                balance_ngwee     INTEGER,
+                fingerprint       TEXT    NOT NULL,
+                status            TEXT    NOT NULL DEFAULT 'Unmatched',
+                journal_entry_id  INTEGER REFERENCES journal_entries(id),
+                note              TEXT    NOT NULL DEFAULT '',
+                UNIQUE (account_id, fingerprint)
+            );
+            CREATE INDEX IF NOT EXISTS ix_bank_lines_status ON bank_lines(account_id, status);
+            -- A ledger entry can only explain one statement line per account.
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_bank_lines_entry ON bank_lines(account_id, journal_entry_id) WHERE journal_entry_id IS NOT NULL;
+            """;
+        cmd.ExecuteNonQuery();
     }
 
     /// <summary>Phase 1 retail tables: customers, variants, stock ledger, returns and the audit trail.</summary>

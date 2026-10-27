@@ -96,7 +96,7 @@
 
         await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
             UserClaims.ToPrincipal(user, CookieAuthenticationDefaults.AuthenticationScheme));
-        Navigation.NavigateTo(SafeReturnUrl(), forceLoad: true);
+        Navigation.NavigateTo(SafeReturnUrl(user), forceLoad: true);
     }
 
     private User? SignInExisting()
@@ -136,10 +136,11 @@
     }
 
     /// <summary>Only allow redirects within this site.</summary>
-    private string SafeReturnUrl() =>
-        !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//") && !ReturnUrl.StartsWith("/\\")
+    // Only local addresses (no open redirects). With none, the person's home page: the till, or the books for accountants.
+    private string SafeReturnUrl(User user) =>
+        !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl != "/" && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//") && !ReturnUrl.StartsWith("/\\")
             ? ReturnUrl
-            : "/";
+            : user.Role.HomePage();
 
     private sealed class LoginInput
     {

@@ -1,0 +1,138 @@
+@page "/accounting"
+@attribute [Authorize(Policy = nameof(Permission.ViewAccounts))]
+@rendermode InteractiveServer
+@inject LedgerRepository Ledger
+@inject BankRepository Bank
+
+<PageTitle>Accounts · WAVE POS</PageTitle>
+
+<div class="page">
+    <AccountingNav />
+    <div class="page-head">
+        <h1>Accounts</h1>
+        @if (_canManage) { <a class="btn primary" href="/accounting/journals/new">New journal</a> }
+    </div>
+
+    <h2 class="sub">Money</h2>
+    <div class="stat-grid">
+        <a class="stat" href="/accounting/accounts/@Id(SystemAccounts.Cash)"><span>Cash on hand</span><strong>@Money.Format(Of(SystemAccounts.Cash))</strong></a>
+        <a class="stat" href="/accounting/bank"><span>Bank &amp; mobile money</span><strong>@Money.Format(_bankTotal)</strong></a>
+        <a class="stat" href="/accounting/accounts/@Id(SystemAccounts.CardClearing)"><span>Card sales not yet banked</span><strong>@Money.Format(Of(SystemAccounts.CardClearing))</strong></a>
+        <a class="stat" href="/accounting/accounts/@Id(SystemAccounts.Payables)"><span>Owed to suppliers</span><strong>@Money.Format(Of(SystemAccounts.Payables))</strong></a>
+        <a class="stat @(_vatDue > 0 ? "warn" : "")" href="/accounting/reports?r=vat"><span>@(_vatDue >= 0 ? "VAT owed to ZRA" : "VAT to claim back from ZRA")</span><strong>@Money.Format(Math.Abs(_vatDue))</strong></a>
+        <a class="stat @(_toReconcile > 0 ? "warn" : "")" href="/accounting/bank"><span>Bank lines to reconcile</span><strong>@_toReconcile</strong></a>
+    </div>
+
+    <h2 class="sub">This month (@_monthStart.ToString("MMMM yyyy"))</h2>
+    <div class="stat-grid">
+        <a class="stat" href="/accounting/reports?r=pl"><span>Income</span><strong>@Money.Format(_month.Income.Total)</strong></a>
+        <a class="stat" href="/accounting/reports?r=pl"><span>Gross profit</span><strong>@Money.Format(_month.GrossProfit)</strong></a>
+        <a class="stat" href="/accounting/reports?r=pl"><span>Gross margin</span><strong>@(_month.GrossMargin is { } m ? m.ToString("P1") : "–")</strong></a>
+        <a class="stat @(_month.NetProfit < 0 ? "danger" : "")" href="/accounting/reports?r=pl"><span>Net profit</span><strong>@Money.Format(_month.NetProfit)</strong></a>
+    </div>
+
+    <div class="two-col">
+        <section class="card">
+            <h2>Recent journals</h2>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>No.</th><th>Date</th><th>Details</th><th class="num">Amount</th></tr></thead>
+                    <tbody>
+                        @foreach (var j in _recent)
+                        {
+                            <tr>
+                                <td><a class="mono" href="/accounting/journals/@j.Id">@j.Number</a></td>
+                                <td class="nowrap">@j.Date.ToString("dd MMM")</td>
+                                <td>@j.Reference<span class="badge">@j.Source.Label()</span></td>
+                                <td class="num">@Money.Format(j.Amount)</td>
+                            </tr>
+                        }
+                        @if (_recent.Count == 0) { <tr><td colspan="4" class="muted empty">Nothing posted yet.</td></tr> }
+                    </tbody>
+                </table>
+            </div>
+            <a href="/accounting/journals">All journals →</a>
+        </section>
+
+        <section class="card">
+            <h2>Lock the books</h2>
+            <p class="muted">
+                After you file a VAT return or close a month, lock it so nothing can be posted on or before that date.
+                The till keeps posting today's sales.
+            </p>
+            <p>Locked up to: <strong>@(_lockDate is { } d ? d.ToString("dd MMM yyyy") : "not locked")</strong></p>
+            @if (_canManage)
+            {
+                <div class="lookup">
+                    <label class="field"><span>Lock up to and including</span><input type="date" @bind="_newLock" max="@Yesterday" /></label>
+                    <button type="button" class="btn" @onclick="SaveLock">Save lock date</button>
+                    @if (_lockDate is not null) { <button type="button" class="btn outline" @onclick="ClearLock">Unlock</button> }
+                </div>
+                @if (_lockError is not null) { <div class="alert error" role="alert">@_lockError</div> }
+            }
+            <h2 class="sub">How sales reach the books</h2>
+            <ul class="muted small-list">
+                <li>Each sale: cash, card or mobile money in; sales and VAT out; stock to cost of sales.</li>
+                <li>Refunds reverse the sale. Restocked items go back into stock.</li>
+                <li>Deliveries go to Inventory and are owed to the supplier. Damaged, expired, stolen and counted stock goes to stock losses.</li>
+                <li>Bank statement lines are matched or given an account on the Bank reconciliation page.</li>
+            </ul>
+        </section>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private List<AccountBalance> _balances = [];
+    private decimal _bankTotal, _vatDue;
+    private int _toReconcile;
+    private DateOnly _monthStart;
+    private ProfitAndLoss _month = default!;
+    private List<JournalSummary> _recent = [];
+    private DateOnly? _lockDate, _newLock;
+    private string? _lockError;
+    private bool _canManage;
+
+    private static string Yesterday => DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd");
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = (await AuthState).User.ToUser().Role.Can(Permission.ManageAccounts);
+        Load();
+    }
+
+    private void Load()
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        _balances = Ledger.Balances(null, today);
+        _bankTotal = _balances.Where(b => b.Account.IsBank).Sum(b => b.Balance);
+        _vatDue = Of(SystemAccounts.VatOutput) - Of(SystemAccounts.VatInput);
+        _toReconcile = Bank.UnmatchedCount();
+        _monthStart = new DateOnly(today.Year, today.Month, 1);
+        _month = Ledger.ProfitAndLoss(_monthStart, today);
+        _recent = Ledger.Journals(new JournalFilter(), 1, 8).Entries;
+        _lockDate = Ledger.LockDate();
+        _newLock = _lockDate;
+    }
+
+    private decimal Of(string key) => _balances.FirstOrDefault(b => b.Account.SystemKey == key)?.Balance ?? 0;
+    private long Id(string key) => _balances.FirstOrDefault(b => b.Account.SystemKey == key)?.Account.Id ?? 0;
+
+    private async Task SaveLock()
+    {
+        _lockError = null;
+        try
+        {
+            Ledger.SetLockDate(_newLock, (await AuthState).User.ToActor());
+            Load();
+        }
+        catch (ArgumentException ex) { _lockError = ex.Message; }
+    }
+
+    private async Task ClearLock()
+    {
+        _newLock = null;
+        await SaveLock();
+    }
+}

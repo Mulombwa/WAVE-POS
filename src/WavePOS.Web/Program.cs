@@ -24,6 +24,15 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.ExpireTimeSpan = TimeSpan.FromHours(12);
         options.SlidingExpiration = true;
 
+        // Signed in but not allowed on a page: go to the person's home page (the till for shop
+        // staff, the books for accountants) rather than one they may not be allowed on either.
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            var home = context.HttpContext.User.ToUser().Role.HomePage();
+            context.Response.Redirect(context.Request.Path == home ? "/login" : home);
+            return Task.CompletedTask;
+        };
+
         // On every request, check the signed-in account still exists, is active and hasn't changed.
         // Otherwise a deleted/disabled user (or a cookie from another database) would stay signed in.
         options.Events.OnValidatePrincipal = async context =>
@@ -63,6 +72,8 @@ builder.Services.AddSingleton<AuditRepository>();
 builder.Services.AddSingleton<InventoryRepository>();
 builder.Services.AddSingleton<CustomerRepository>();
 builder.Services.AddSingleton<ReturnRepository>();
+builder.Services.AddSingleton<LedgerRepository>();
+builder.Services.AddSingleton<BankRepository>();
 
 var app = builder.Build();
 

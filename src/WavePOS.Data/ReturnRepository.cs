@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using WavePOS.Core;
+using WavePOS.Core.Accounting;
 using WavePOS.Core.Audit;
 using WavePOS.Core.Documents;
 using WavePOS.Core.Inventory;
@@ -57,8 +58,19 @@ public class ReturnRepository(PosDatabase db)
             returnId = (long)cmd.ExecuteScalar()!;
         }
 
+        var restockedCost = 0m;
+        var rounding = new List<(Product Product, decimal Difference)>();
         foreach (var l in lines)
         {
+            if (l.Restock)
+            {
+                // Goods come back at the cost they were sold at, averaged into the current cost.
+                var soldAt = SoldAtCost(conn, tx, l.Line.SaleLineId);
+                restockedCost += soldAt * l.Quantity;
+                var product = ProductRepository.GetById(conn, tx, l.Line.ProductId)!;
+                rounding.Add((product, InventoryRepository.AverageIn(conn, tx, product, l.Quantity, soldAt)));
+            }
+
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = """
@@ -79,6 +91,11 @@ public class ReturnRepository(PosDatabase db)
                 InventoryRepository.ApplyMovement(conn, tx, l.Line.ProductId, l.Quantity, StockReason.Return,
                     request.Reason.ToString(), $"Refund R{returnId:D6} (sale #{request.SaleId:D6})", actor);
         }
+
+        LedgerRepository.PostAutomatic(conn, tx, PostingRules.Refund(returnId, request.SaleId, DateOnly.FromDateTime(DateTime.Today),
+            request.RefundMethod, total, vat, restockedCost, LedgerRepository.SystemAccountLookup(conn, tx)), actor);
+        foreach (var (product, difference) in rounding)
+            InventoryRepository.PostRounding(conn, tx, product, difference, actor);
 
         AuditRepository.Write(conn, tx, actor, AuditActions.ReturnProcessed, "return", returnId.ToString(CultureInfo.InvariantCulture),
             $"Refund R{returnId:D6} against sale #{request.SaleId:D6}: {lines.Sum(l => l.Quantity)} item(s), " +
@@ -158,6 +175,19 @@ public class ReturnRepository(PosDatabase db)
                 Money.FromNgwee(r.GetInt64(3)), Enum.Parse<PaymentMethod>(r.GetString(4)),
                 Enum.TryParse<ReturnReason>(r.GetString(5), out var reason) ? reason : ReturnReason.Other, r.GetString(6)));
         return list;
+    }
+
+    /// <summary>The unit cost recorded when the item was sold (older sales fall back to today's cost).</summary>
+    private static decimal SoldAtCost(SqliteConnection conn, SqliteTransaction tx, long saleLineId)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT CASE WHEN l.unit_cost_ngwee > 0 THEN l.unit_cost_ngwee ELSE COALESCE(p.cost_ngwee, 0) END
+            FROM sale_lines l LEFT JOIN products p ON p.id = l.product_id WHERE l.id = $id;
+            """;
+        cmd.Parameters.AddWithValue("$id", saleLineId);
+        return Money.FromNgwee(cmd.ExecuteScalar() as long? ?? 0);
     }
 
     private static List<ReturnableLine> GetReturnable(SqliteConnection conn, SqliteTransaction tx, long saleId)

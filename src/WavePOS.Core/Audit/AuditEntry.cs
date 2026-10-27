@@ -69,4 +69,15 @@ public static class AuditActions
     public const string PasswordReset = "staff.password_reset";
 
     public const string SettingsChanged = "settings.changed";
+
+    public const string AccountCreated = "books.account_created";
+    public const string AccountUpdated = "books.account_updated";
+    public const string JournalPosted = "books.journal_posted";
+    public const string JournalReversed = "books.journal_reversed";
+    public const string LockDateChanged = "books.lock_date";
+
+    public const string BankImported = "bank.statement_imported";
+    public const string BankMatched = "bank.matched";
+    public const string BankCategorised = "bank.posted";
+    public const string BankExcluded = "bank.excluded";
 }

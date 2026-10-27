@@ -1,5 +1,6 @@
 using System.Globalization;
 using WavePOS.Core;
+using WavePOS.Core.Accounting;
 using WavePOS.Core.Audit;
 using WavePOS.Core.Documents;
 using WavePOS.Core.Inventory;
@@ -38,14 +39,20 @@ public class SaleRepository(PosDatabase db)
             sale.Id = (long)cmd.ExecuteScalar()!;
         }
 
+        var totalCost = 0m;
         foreach (var line in sale.Lines)
         {
+            // Cost at the time of sale, for cost of sales now and for refunds later.
+            var unitCost = ProductRepository.GetById(conn, tx, line.ProductId)?.Cost ?? 0m;
+            totalCost += unitCost * line.Quantity;
+
             using var lineCmd = conn.CreateCommand();
             lineCmd.Transaction = tx;
             lineCmd.CommandText = """
-                INSERT INTO sale_lines (sale_id, product_id, product_name, unit_price_ngwee, quantity, vat_rate)
-                VALUES ($sale, $product, $name, $price, $qty, $vat);
+                INSERT INTO sale_lines (sale_id, product_id, product_name, unit_price_ngwee, quantity, vat_rate, unit_cost_ngwee)
+                VALUES ($sale, $product, $name, $price, $qty, $vat, $cost);
                 """;
+            lineCmd.Parameters.AddWithValue("$cost", Money.ToNgwee(unitCost));
             lineCmd.Parameters.AddWithValue("$sale", sale.Id);
             lineCmd.Parameters.AddWithValue("$product", line.ProductId);
             lineCmd.Parameters.AddWithValue("$name", line.ProductName);
@@ -57,6 +64,9 @@ public class SaleRepository(PosDatabase db)
             InventoryRepository.ApplyMovement(conn, tx, line.ProductId, -line.Quantity, StockReason.Sale, "",
                 $"Sale #{sale.Id:D6}", actor);
         }
+
+        LedgerRepository.PostAutomatic(conn, tx, PostingRules.Sale(sale.Id, DateOnly.FromDateTime(sale.Timestamp), sale.PaymentMethod,
+            sale.Total, sale.VatAmount, totalCost, LedgerRepository.SystemAccountLookup(conn, tx)), actor);
 
         AuditRepository.Write(conn, tx, actor, AuditActions.SaleCompleted, "sale", sale.Id.ToString(CultureInfo.InvariantCulture),
             $"Sale #{sale.Id:D6}: {sale.Lines.Sum(l => l.Quantity)} item(s), {Money.Format(sale.Total)} by {sale.PaymentMethod.DisplayName()}"

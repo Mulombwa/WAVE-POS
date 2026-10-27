@@ -1,3 +1,4 @@
+@using WavePOS.Core.Security
 @inject NavigationManager Navigation
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
@@ -7,8 +8,11 @@
         var user = (await AuthState).User;
         if (user.Identity?.IsAuthenticated == true)
         {
-            // Signed in but not allowed (e.g. a cashier opening Settings): back to the till.
-            Navigation.NavigateTo("/", forceLoad: true);
+            // Signed in but not allowed (e.g. a cashier opening Settings): back to their home page,
+            // which is the till for shop staff and the books for accountants.
+            var home = user.ToUser().Role.HomePage();
+            var here = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?')[0];
+            Navigation.NavigateTo(here == home ? "/login" : home, forceLoad: true);
             return;
         }
         var returnUrl = Uri.EscapeDataString("/" + Navigation.ToBaseRelativePath(Navigation.Uri));

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using WavePOS.Core;
+using WavePOS.Core.Accounting;
 using WavePOS.Core.Audit;
 using WavePOS.Core.Inventory;
 
@@ -24,19 +25,11 @@ public class InventoryRepository(PosDatabase db)
         using var tx = conn.BeginTransaction();
         var product = ProductRepository.GetById(conn, tx, productId) ?? throw new InvalidOperationException("Product not found.");
 
-        if (unitCost is { } cost)
-        {
-            var onHand = Math.Max(product.StockQuantity, 0);
-            var average = onHand == 0 ? cost : (product.Cost * onHand + cost * quantity) / (onHand + quantity);
-            using var upd = conn.CreateCommand();
-            upd.Transaction = tx;
-            upd.CommandText = "UPDATE products SET cost_ngwee = $c WHERE id = $id;";
-            upd.Parameters.AddWithValue("$c", Money.ToNgwee(average));
-            upd.Parameters.AddWithValue("$id", productId);
-            upd.ExecuteNonQuery();
-        }
-
+        var cost = unitCost ?? product.Cost;
+        var rounding = AverageIn(conn, tx, product, quantity, cost);
         var balance = ApplyMovement(conn, tx, productId, quantity, StockReason.Received, note, reference, actor);
+        PostStock(conn, tx, product, StockReason.Received, quantity, cost, actor);
+        PostRounding(conn, tx, product, rounding, actor);
         AuditRepository.Write(conn, tx, actor, AuditActions.StockReceived, "product", productId.ToString(CultureInfo.InvariantCulture),
             $"{product.Name}: received {quantity}{(unitCost is { } c2 ? $" at {Money.Format(c2)}" : "")} → {balance} on hand. {note}".Trim());
         tx.Commit();
@@ -56,6 +49,7 @@ public class InventoryRepository(PosDatabase db)
         using var tx = conn.BeginTransaction();
         var product = ProductRepository.GetById(conn, tx, productId) ?? throw new InvalidOperationException("Product not found.");
         var balance = ApplyMovement(conn, tx, productId, change, reason, note, null, actor);
+        PostStock(conn, tx, product, reason, change, product.Cost, actor);
         AuditRepository.Write(conn, tx, actor, AuditActions.StockAdjusted, "product", productId.ToString(CultureInfo.InvariantCulture),
             $"{product.Name}: {change:+0;-0} ({reason}) → {balance} on hand. {note}".Trim());
         tx.Commit();
@@ -71,7 +65,11 @@ public class InventoryRepository(PosDatabase db)
         using var tx = conn.BeginTransaction();
         var product = ProductRepository.GetById(conn, tx, productId) ?? throw new InvalidOperationException("Product not found.");
         var change = counted - product.StockQuantity;
-        if (change != 0) ApplyMovement(conn, tx, productId, change, StockReason.StockCount, note, null, actor);
+        if (change != 0)
+        {
+            ApplyMovement(conn, tx, productId, change, StockReason.StockCount, note, null, actor);
+            PostStock(conn, tx, product, StockReason.StockCount, change, product.Cost, actor);
+        }
         AuditRepository.Write(conn, tx, actor, AuditActions.StockAdjusted, "product", productId.ToString(CultureInfo.InvariantCulture),
             $"{product.Name}: stock count {counted} (was {product.StockQuantity}, difference {change:+0;-0;0}). {note}".Trim());
         tx.Commit();
@@ -117,6 +115,40 @@ public class InventoryRepository(PosDatabase db)
         return new InventorySummary(r.GetInt32(0), r.GetInt32(1), Money.FromNgwee(r.GetInt64(2)),
             Money.FromNgwee(r.GetInt64(3)), r.GetInt32(4), r.GetInt32(5));
     }
+
+    /// <summary>
+    /// Stock coming in at a unit cost: moves the product's cost to the weighted average of what
+    /// was on hand and what came in. Call before <see cref="ApplyMovement"/>. Returns the small
+    /// difference (from rounding the average to the ngwee) between the new stock value and the old
+    /// value plus what came in, to post with <see cref="PostRounding"/>.
+    /// </summary>
+    internal static decimal AverageIn(SqliteConnection conn, SqliteTransaction tx, Core.Models.Product product, int quantity, decimal unitCost)
+    {
+        var onHand = Math.Max(product.StockQuantity, 0);
+        var average = Money.Round(onHand + quantity <= 0 ? unitCost : (product.Cost * onHand + unitCost * quantity) / (onHand + quantity));
+        if (average != product.Cost)
+        {
+            using var upd = conn.CreateCommand();
+            upd.Transaction = tx;
+            upd.CommandText = "UPDATE products SET cost_ngwee = $c WHERE id = $id;";
+            upd.Parameters.AddWithValue("$c", Money.ToNgwee(average));
+            upd.Parameters.AddWithValue("$id", product.Id);
+            upd.ExecuteNonQuery();
+        }
+        var before = onHand * product.Cost;
+        var after = Math.Max(product.StockQuantity + quantity, 0) * average;
+        return Money.Round(after - before - quantity * unitCost);
+    }
+
+    internal static void PostRounding(SqliteConnection conn, SqliteTransaction tx, Core.Models.Product product, decimal difference, Actor actor) =>
+        LedgerRepository.PostAutomatic(conn, tx, PostingRules.Revaluation(product.Id, product.Name, DateOnly.FromDateTime(DateTime.Today),
+            difference, "rounding on average cost", LedgerRepository.SystemAccountLookup(conn, tx)), actor);
+
+    /// <summary>Posts a stock change to the books at cost (Inventory against supplier, opening balances or stock losses).</summary>
+    internal static void PostStock(SqliteConnection conn, SqliteTransaction tx, Core.Models.Product product, StockReason reason,
+        int change, decimal unitCost, Actor actor) =>
+        LedgerRepository.PostAutomatic(conn, tx, PostingRules.StockMovement(product.Id, product.Name, DateOnly.FromDateTime(DateTime.Today),
+            reason, change, unitCost, LedgerRepository.SystemAccountLookup(conn, tx)), actor);
 
     /// <summary>Changes stock and records it in the ledger, inside the caller's transaction. Returns the new level.</summary>
     internal static int ApplyMovement(SqliteConnection conn, SqliteTransaction tx, long productId, int change,
