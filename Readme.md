@@ -76,13 +76,46 @@ Double-entry books that fill themselves from the shop. Accountants and bookkeepe
 - **Reports**: profit & loss, balance sheet, trial balance and a VAT summary for the ZRA return (standard-rated and zero-rated sales, output and input VAT). Each has CSV download and print. Each account has a ledger with a running balance.
 - **Bank feeds**: live feeds need a bank or aggregator partner. Statement import works today, and a feed can plug into the same import (`BankRepository.ImportLines`).
 
+## Supply chain & orders (web portal)
+
+WAVE POS is growing into an ERP. Buying and selling on account sit alongside the till; every step updates stock, posts to the books and is audited.
+
+**Buying (procure-to-pay), under Purchasing**
+- **Suppliers** with ZRA TPIN, contact details and payment terms.
+- **Purchase orders**: raise a draft, then place it. Orders within the **approval limit** (default K5,000, set by a manager) are approved straight away; bigger ones wait for a manager. Nobody can approve their own order unless they're the only person who can approve, and that is flagged in the audit trail.
+- **Goods received**: receive all or part of an order. Stock goes up at the ordered cost (averaged into the product's cost) and the books record it as *Goods received not yet billed*.
+- **Supplier bills**: entered for exactly what was received, at the ordered price (three-way match: order, receipt, bill). The same supplier invoice number can't be entered twice. VAT on the bill becomes claimable input VAT.
+- **Payments** from cash, bank or mobile money, in full or in part. They appear on the bank reconciliation page for matching.
+- **Bills to pay** with ageing (not yet due, 1–30, 31–60, 61–90, over 90 days) and **reorder suggestions** that count stock already on order and turn into a draft purchase order in one click.
+
+**Selling on account (order-to-cash), under Sales orders**
+- **Quotes** with a validity date, printable as a quotation. Prices include VAT, like the till.
+- **Confirming** reserves the stock and runs a **credit check**: what the customer owes plus open orders plus this order must stay within their credit limit. Going over needs a manager and a reason, recorded in the audit trail.
+- **Deliveries** take stock out (it must be on hand) and post cost of sales; each prints a **delivery note** with signature lines.
+- **Invoices** for what was delivered, due according to the customer's payment terms, then **customer payments** into cash, bank or mobile money.
+- **Invoices & money owed** with ageing. Each customer's profile shows their account: TPIN, credit limit, terms, balance and orders.
+
+**Who does what (separation of duties)**
+
+| Role | Purchasing & sales orders |
+| --- | --- |
+| Supervisor | Raise purchase orders, receive goods, raise quotes, confirm orders (within credit limits) and deliver |
+| Accountant / bookkeeper | See everything; enter supplier bills, raise invoices, record payments |
+| Manager | Everything, including approving big orders, setting the approval limit and credit limits, and credit-limit overrides |
+
+Printed invoices are titled *Invoice*. ZRA requires VAT-registered businesses to issue tax invoices through **ZRA Smart Invoice**; connecting to it is on the roadmap.
+
 ## Roadmap
 
 1. ✅ Retail core: staff & roles, audit trail, inventory & variants, customers, returns.
 2. ✅ Accounting: chart of accounts, double-entry books from sales/refunds/stock, accountant & bookkeeper views, bank statement import and reconciliation.
-3. Central server sync: desktop tills share the web portal's data and work offline.
-4. Reports & analytics: sales by day/product/staff/customer, margins, seasonal trends, stock turnover.
-5. Hardware: ESC/POS receipt printers and cash drawers, barcode scanners, card terminals and mobile money (provider to be chosen).
+3. ✅ Supply chain & orders: suppliers, purchase orders with approvals, goods received, supplier bills and payments; quotes, sales orders with credit control, deliveries, invoices and customer payments.
+4. HR & payroll: employee records, contracts, leave and attendance, Zambian payroll (PAYE, NAPSA, NHIMA), payslips, posted to the books.
+5. Central server sync: desktop tills share the web portal's data and work offline.
+6. Integrations & platform: ZRA Smart Invoice, a REST API, modules that can be switched on or off, encryption of sensitive fields and security monitoring.
+7. Reports & analytics: sales by day/product/staff/customer, margins, seasonal trends, stock turnover.
+8. Hardware: ESC/POS receipt printers and cash drawers, barcode scanners, card terminals and mobile money (provider to be chosen).
+9. Later: manufacturing (bills of materials and production orders).
 
 ## Logging in
 

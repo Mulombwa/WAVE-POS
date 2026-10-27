@@ -1,0 +1,111 @@
+@page "/purchasing/suppliers"
+@attribute [Authorize(Policy = nameof(Permission.ViewPurchasing))]
+@rendermode InteractiveServer
+@inject PurchasingRepository Purchasing
+
+<PageTitle>Suppliers · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="true" />
+    <div class="page-head">
+        <h1>Suppliers</h1>
+        @if (_canManage) { <button type="button" class="btn primary" @onclick="StartAdd">Add supplier</button> }
+    </div>
+    <div class="filters">
+        <input type="search" placeholder="Search name, code, TPIN or phone…" @bind="Search" @bind:event="oninput" aria-label="Search suppliers" />
+        <label class="check inline"><input type="checkbox" @bind="ShowInactive" /> Show switched-off suppliers</label>
+    </div>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>Code</th><th>Name</th><th>TPIN</th><th>Contact</th><th>Terms</th><th class="num">Owed</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var s in _suppliers)
+                {
+                    <tr class="@(s.IsActive ? "" : "inactive")">
+                        <td class="mono">@s.Code</td>
+                        <td>@s.Name @if (!s.IsActive) { <span class="badge">Off</span> }</td>
+                        <td class="mono">@s.Tpin</td>
+                        <td>@s.ContactName @if (s.Phone.Length > 0) { <span class="muted"> · @s.Phone</span> }</td>
+                        <td>@(s.PaymentTermsDays == 0 ? "On receipt" : $"{s.PaymentTermsDays} days")</td>
+                        <td class="num">@Money.Format(s.Balance)</td>
+                        <td class="row-actions">
+                            <a class="btn outline small" href="/purchasing/bills?supplier=@s.Id">Bills</a>
+                            @if (_canManage) { <button type="button" class="btn outline small" @onclick="() => StartEdit(s)">Edit</button> }
+                        </td>
+                    </tr>
+                }
+                @if (_suppliers.Count == 0) { <tr><td colspan="7" class="muted empty">No suppliers yet.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _editing = null"></div>
+    <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="supplier-title">
+        <h2 id="supplier-title">@(_editing.Id == 0 ? "Add supplier" : $"Edit {_editing.Code}")</h2>
+        @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+        <label class="field"><span>Business name</span><input @bind="_editing.Name" /></label>
+        <div class="two-col">
+            <label class="field"><span>ZRA TPIN (10 digits)</span><input @bind="_editing.Tpin" inputmode="numeric" maxlength="10" /></label>
+            <label class="field"><span>Payment terms (days, 0 = on receipt)</span><input type="number" min="0" max="365" @bind="_editing.PaymentTermsDays" /></label>
+            <label class="field"><span>Contact person</span><input @bind="_editing.ContactName" /></label>
+            <label class="field"><span>Phone</span><input type="tel" @bind="_editing.Phone" /></label>
+        </div>
+        <label class="field"><span>Email</span><input type="email" @bind="_editing.Email" /></label>
+        <label class="field"><span>Address</span><input @bind="_editing.Address" /></label>
+        <label class="field"><span>Notes</span><input @bind="_editing.Notes" /></label>
+        @if (_editing.Id != 0) { <label class="check"><input type="checkbox" @bind="_editing.IsActive" /> Active (can be ordered from)</label> }
+        <div class="modal-actions">
+            <button type="button" class="btn outline" @onclick="() => _editing = null">Cancel</button>
+            <button type="button" class="btn primary" @onclick="Save">Save</button>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private List<Supplier> _suppliers = [];
+    private bool _canManage, _showInactive;
+    private string _search = "";
+    private Supplier? _editing;
+    private string? _error;
+
+    private string Search { get => _search; set { _search = value; Load(); } }
+    private bool ShowInactive { get => _showInactive; set { _showInactive = value; Load(); } }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = (await AuthState).User.ToUser().Role.Can(Permission.ManagePurchasing);
+        Load();
+    }
+
+    private void Load() => _suppliers = Purchasing.Suppliers(_showInactive, _search);
+
+    private void StartAdd() { _error = null; _editing = new Supplier(); }
+
+    private void StartEdit(Supplier s)
+    {
+        _error = null;
+        _editing = new Supplier
+        {
+            Id = s.Id, Code = s.Code, Name = s.Name, Tpin = s.Tpin, ContactName = s.ContactName, Phone = s.Phone,
+            Email = s.Email, Address = s.Address, PaymentTermsDays = s.PaymentTermsDays, IsActive = s.IsActive, Notes = s.Notes,
+        };
+    }
+
+    private async Task Save()
+    {
+        _error = null;
+        try
+        {
+            Purchasing.SaveSupplier(_editing!, (await AuthState).User.ToActor());
+            _editing = null;
+            Load();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _error = ex.Message; }
+    }
+}

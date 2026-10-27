@@ -1,0 +1,338 @@
+@page "/sales/orders/{Id:long}"
+@attribute [Authorize(Policy = nameof(Permission.ViewSalesOrders))]
+@rendermode InteractiveServer
+@inject SalesOrderRepository SalesOrders
+@inject LedgerRepository Ledger
+
+<PageTitle>@(_order?.Number ?? "Sales order") · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="false" />
+    @if (_order is null)
+    {
+        <h1>Order not found</h1>
+        <a href="/sales">Back to sales orders</a>
+    }
+    else
+    {
+        <div class="page-head">
+            <h1>@(_order.Status == SalesOrderStatus.Quote ? "Quote" : "Sales order") <span class="mono">@_order.Number</span> <PoStatusBadge SalesStatus="_order.Status" /></h1>
+            <div class="row-actions">
+                <a class="btn outline" href="/print/quote/@_order.Id" target="_blank" rel="noopener">@(_order.Status == SalesOrderStatus.Quote ? "Print quotation" : "Print order")</a>
+                @if (_order.CanEdit && Can(Permission.ManageSalesOrders)) { <a class="btn outline" href="/sales/orders/@_order.Id/edit">Edit</a> }
+            </div>
+        </div>
+
+        @if (_message is not null) { <div class="alert @(_isError ? "error" : "success")" role="status">@_message</div> }
+
+        <section class="card">
+            <dl class="facts">
+                <dt>Customer</dt><dd><a href="/customers/@_order.CustomerId">@_order.CustomerName</a></dd>
+                <dt>Date</dt><dd>@_order.OrderDate.ToString("dd MMM yyyy")@(_order.ValidUntil is { } v && _order.Status == SalesOrderStatus.Quote ? $" · valid until {v:dd MMM yyyy}" : "")</dd>
+                <dt>Raised by</dt><dd>@_order.CreatedByName</dd>
+                @if (_order.CreditOverride is { } why) { <dt>Credit limit</dt><dd><span class="badge warn">Overridden</span> @why</dd> }
+                @if (_order.Notes.Length > 0) { <dt>Notes</dt><dd>@_order.Notes</dd> }
+            </dl>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Item</th><th class="num">Ordered</th><th class="num">Delivered</th><th class="num">Invoiced</th><th class="num">In stock</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in _order.Lines)
+                        {
+                            var a = _availability.GetValueOrDefault(l.ProductId);
+                            <tr>
+                                <td>@l.Description</td>
+                                <td class="num">@l.Quantity</td>
+                                <td class="num">@l.Delivered</td>
+                                <td class="num">@l.Invoiced</td>
+                                <td class="num @(a is not null && l.ToDeliver > a.OnHand ? "out-of-balance" : "")">@a?.OnHand</td>
+                                <td class="num">@Money.Format(l.UnitPrice)</td>
+                                <td class="num">@Money.Format(l.Gross)</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot>
+                        <tr><th colspan="6">Subtotal (excl. VAT)</th><th class="num">@Money.Format(_order.Net)</th></tr>
+                        <tr><th colspan="6">VAT</th><th class="num">@Money.Format(_order.Vat)</th></tr>
+                        <tr><th colspan="6">Total</th><th class="num">@Money.Format(_order.Total)</th></tr>
+                    </tfoot>
+                </table>
+            </div>
+        </section>
+
+        @if (_order.Status == SalesOrderStatus.Quote && Can(Permission.ManageSalesOrders))
+        {
+            <section class="card">
+                <h2>Customer accepted?</h2>
+                <p class="muted">Confirming turns the quote into an order and reserves the stock. It's checked against the customer's credit limit.</p>
+                @if (_creditProblem is null)
+                {
+                    <button type="button" class="btn primary" @onclick="() => Confirm(null)">Confirm order</button>
+                }
+                else
+                {
+                    <div class="alert warn" role="alert">@_creditProblem</div>
+                    @if (Can(Permission.ManageCredit))
+                    {
+                        <div class="lookup">
+                            <label class="field grow"><span>Reason for going over the limit</span><input @bind="_overrideReason" @bind:event="oninput" placeholder="e.g. Paying cash on delivery" /></label>
+                            <button type="button" class="btn danger-solid" disabled="@string.IsNullOrWhiteSpace(_overrideReason)" @onclick="() => Confirm(_overrideReason)">Confirm anyway</button>
+                        </div>
+                        <p class="muted small">This is recorded in the audit trail.</p>
+                    }
+                    else
+                    {
+                        <p class="muted">Ask a manager to confirm it, or ask the customer to pay what they owe first.</p>
+                    }
+                }
+            </section>
+        }
+
+        @if (_order.CanDeliver && Can(Permission.ManageSalesOrders))
+        {
+            <section class="card">
+                <h2>Deliver</h2>
+                <p class="muted">Goods leave stock now. Part deliveries are fine; the rest stays reserved.</p>
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>Item</th><th class="num">Still to deliver</th><th class="num">In stock</th><th class="num">Deliver now</th></tr></thead>
+                        <tbody>
+                            @foreach (var l in _order.Lines.Where(l => l.ToDeliver > 0))
+                            {
+                                <tr>
+                                    <td>@l.Description</td>
+                                    <td class="num">@l.ToDeliver</td>
+                                    <td class="num">@_availability.GetValueOrDefault(l.ProductId)?.OnHand</td>
+                                    <td class="num"><input class="money-input qty-input" type="number" min="0" max="@l.ToDeliver" @bind="_deliver[l.Id]" aria-label="Deliver now" /></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="lookup">
+                    <label class="field grow"><span>Note (e.g. driver or vehicle)</span><input @bind="_deliverNote" /></label>
+                    <button type="button" class="btn primary" @onclick="Deliver">Deliver &amp; print delivery note</button>
+                </div>
+            </section>
+        }
+
+        @if (_order.HasUninvoiced)
+        {
+            <section class="card">
+                <h2>Invoice the customer</h2>
+                @if (Can(Permission.ManageAccounts))
+                {
+                    <p class="muted">Invoices everything delivered but not yet invoiced (@_order.Lines.Sum(l => l.ToInvoice) item(s), @Money.Format(_order.Lines.Sum(l => Money.Round(l.ToInvoice * l.UnitPrice)))).</p>
+                    <div class="lookup">
+                        <label class="field"><span>Invoice date</span><input type="date" @bind="_invoiceDate" /></label>
+                        <button type="button" class="btn primary" @onclick="RaiseInvoice">Raise invoice</button>
+                    </div>
+                }
+                else
+                {
+                    <p class="muted">Delivered and waiting to be invoiced. Accounts staff raise invoices.</p>
+                }
+            </section>
+        }
+
+        @if (_invoices.Count > 0)
+        {
+            <section class="card">
+                <h2>Invoices and payments</h2>
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Owed</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var i in _invoices)
+                            {
+                                <tr>
+                                    <td><a class="mono" href="/print/invoice/@i.Id" target="_blank" rel="noopener">@i.Number</a>
+                                        @if (i.JournalEntryId is { } j) { <a class="mono ref" href="/accounting/journals/@j">J@(j.ToString("D6"))</a> }</td>
+                                    <td class="nowrap">@i.Date.ToString("dd MMM yyyy")</td>
+                                    <td class="nowrap @(i.Outstanding > 0 && i.DueDate < Today ? "out-of-balance" : "")">@i.DueDate.ToString("dd MMM yyyy")</td>
+                                    <td class="num">@Money.Format(i.Total)</td>
+                                    <td class="num">@Money.Format(i.Paid)</td>
+                                    <td class="num">@Money.Format(i.Outstanding)</td>
+                                    <td>
+                                        @if (i.Outstanding > 0 && Can(Permission.ManageAccounts)) { <button type="button" class="btn small" @onclick="() => StartPayment(i)">Record payment</button> }
+                                        else if (i.Outstanding == 0) { <span class="badge ok">Paid</span> }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (_payments.Count > 0)
+                {
+                    <h2 class="sub">Payments received</h2>
+                    <ul class="small-list">
+                        @foreach (var p in _payments)
+                        {
+                            <li>@p.Date.ToString("dd MMM yyyy"): @Money.Format(p.Amount) into @p.AccountName@(p.Reference.Length > 0 ? $" ({p.Reference})" : "") by @p.UserName</li>
+                        }
+                    </ul>
+                }
+            </section>
+        }
+
+        @if (_deliveries.Count > 0)
+        {
+            <section class="card">
+                <h2>Deliveries</h2>
+                <ul class="small-list">
+                    @foreach (var d in _deliveries)
+                    {
+                        <li><a class="mono" href="/print/delivery/@d.Id" target="_blank" rel="noopener">@d.Number</a> @d.Date.ToString("dd MMM yyyy") by @d.UserName:
+                            @string.Join(", ", d.Lines.Select(l => $"{l.Quantity} × {l.Description}"))@(d.Note.Length > 0 ? $" ({d.Note})" : "")</li>
+                    }
+                </ul>
+            </section>
+        }
+
+        @if (_order.Status != SalesOrderStatus.Cancelled && _order.Lines.All(l => l.Delivered == 0) && Can(Permission.ManageSalesOrders))
+        {
+            <details class="card">
+                <summary>Cancel this @(_order.Status == SalesOrderStatus.Quote ? "quote" : "order")</summary>
+                <div class="lookup">
+                    <label class="field grow"><span>Reason</span><input @bind="_cancelReason" @bind:event="oninput" /></label>
+                    <button type="button" class="btn danger-solid" disabled="@string.IsNullOrWhiteSpace(_cancelReason)" @onclick="Cancel">Cancel</button>
+                </div>
+            </details>
+        }
+    }
+</div>
+
+@if (_paying is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _paying = null"></div>
+    <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="receive-title">
+        <h2 id="receive-title">Payment from @_paying.CustomerName</h2>
+        <p>@_paying.Number · owed @Money.Format(_paying.Outstanding)</p>
+        <div class="two-col">
+            <label class="field"><span>Amount</span><input type="number" min="0.01" step="0.01" @bind="_payAmount" /></label>
+            <label class="field"><span>Date received</span><input type="date" @bind="_payDate" /></label>
+        </div>
+        <label class="field">
+            <span>Paid into</span>
+            <select @bind="_payInto">@foreach (var a in _moneyAccounts) { <option value="@a.Id">@a.Display</option> }</select>
+        </label>
+        <label class="field"><span>Reference (e.g. transfer or mobile money ID)</span><input @bind="_payRef" /></label>
+        <div class="modal-actions">
+            <button type="button" class="btn outline" @onclick="() => _paying = null">Cancel</button>
+            <button type="button" class="btn primary" @onclick="RecordPayment">Record payment</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private UserRole _role;
+    private SalesOrder? _order;
+    private Dictionary<long, ProductAvailability> _availability = [];
+    private List<CustomerInvoice> _invoices = [];
+    private List<DeliveryView> _deliveries = [];
+    private List<PaymentView> _payments = [];
+    private List<Account> _moneyAccounts = [];
+    private Dictionary<long, int> _deliver = [];
+    private string _deliverNote = "", _cancelReason = "", _overrideReason = "", _payRef = "";
+    private string? _creditProblem;
+    private DateOnly _invoiceDate = Today, _payDate = Today;
+    private CustomerInvoice? _paying;
+    private decimal _payAmount;
+    private long _payInto;
+    private string? _message;
+    private bool _isError;
+
+    private bool Can(Permission p) => _role.Can(p);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        _moneyAccounts = Ledger.MoneyAccounts();
+        _payInto = _moneyAccounts.FirstOrDefault(a => a.SystemKey == SystemAccounts.Bank)?.Id ?? _moneyAccounts.FirstOrDefault()?.Id ?? 0;
+        Load();
+    }
+
+    private void Load()
+    {
+        _order = SalesOrders.GetOrder(Id);
+        if (_order is null) return;
+        _availability = SalesOrders.Availability(_order.Lines.Select(l => l.ProductId));
+        _invoices = SalesOrders.Invoices(orderId: Id);
+        _deliveries = SalesOrders.Deliveries(Id);
+        _payments = SalesOrders.Payments(Id);
+        _deliver = _order.Lines.ToDictionary(l => l.Id, l => Math.Max(0, Math.Min(l.ToDeliver, _availability.GetValueOrDefault(l.ProductId)?.OnHand ?? 0)));
+    }
+
+    private async Task<bool> Do(Action<WavePOS.Core.Audit.Actor> action, string done)
+    {
+        _message = null;
+        _isError = false;
+        try
+        {
+            action((await AuthState).User.ToActor());
+            if (done.Length > 0) _message = done;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _message = ex.Message;
+            _isError = true;
+        }
+        Load();
+        return !_isError;
+    }
+
+    private async Task Confirm(string? overrideReason)
+    {
+        _creditProblem = null;
+        try
+        {
+            SalesOrders.Confirm(Id, (await AuthState).User.ToActor(), overrideReason);
+            _message = "Order confirmed. The stock is reserved for it.";
+            _isError = false;
+        }
+        catch (CreditLimitException ex) { _creditProblem = ex.Message; _message = null; }
+        catch (InvalidOperationException ex) { _message = ex.Message; _isError = true; }
+        Load();
+    }
+
+    private async Task Deliver()
+    {
+        long id = 0;
+        if (await Do(a => id = SalesOrders.Deliver(Id, _deliver.Where(kv => kv.Value != 0).ToDictionary(), _deliverNote, a), ""))
+        {
+            _message = $"Delivered as DN{id:D6}.";
+            _deliverNote = "";
+            await JS.InvokeVoidAsync("open", $"/print/delivery/{id}", "_blank");
+        }
+    }
+
+    private async Task RaiseInvoice()
+    {
+        long id = 0;
+        if (await Do(a => id = SalesOrders.Invoice(Id, _invoiceDate, a), "")) _message = $"Invoice INV{id:D6} raised.";
+    }
+
+    private Task Cancel() => Do(a => SalesOrders.Cancel(Id, _cancelReason, a), "Cancelled.");
+
+    private void StartPayment(CustomerInvoice i)
+    {
+        _paying = i;
+        _payAmount = i.Outstanding;
+        _payDate = Today;
+        _payRef = "";
+    }
+
+    private async Task RecordPayment()
+    {
+        var invoice = _paying!;
+        _paying = null;
+        await Do(a => SalesOrders.ReceivePayment(invoice.Id, _payAmount, _payDate, _payInto, _payRef, a),
+            $"Payment of {Money.Format(_payAmount)} recorded. It will show up for matching on the bank reconciliation page.");
+    }
+}

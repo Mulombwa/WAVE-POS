@@ -1,0 +1,120 @@
+@page "/purchasing/orders/new"
+@page "/purchasing/orders/{Id:long}/edit"
+@attribute [Authorize(Policy = nameof(Permission.ManagePurchasing))]
+@rendermode InteractiveServer
+@inject PurchasingRepository Purchasing
+@inject ProductRepository Products
+@inject NavigationManager Navigation
+
+<PageTitle>@(Id is null ? "New purchase order" : $"Edit PO{Id:D6}") · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="true" />
+    <h1>@(Id is null ? "New purchase order" : $"Edit PO{Id:D6}")</h1>
+
+    @if (_notEditable)
+    {
+        <div class="alert error" role="alert">Only draft orders can be changed. <a href="/purchasing/orders/@Id">Back to the order</a></div>
+    }
+    else
+    {
+        <section class="card">
+            @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+            <div class="three-col">
+                <label class="field">
+                    <span>Supplier</span>
+                    <select @bind="_supplierId">
+                        <option value="0">Choose a supplier…</option>
+                        @foreach (var s in _suppliers) { <option value="@s.Id">@s.Name</option> }
+                    </select>
+                </label>
+                <label class="field"><span>Expected delivery (optional)</span><input type="date" @bind="_expected" /></label>
+                <label class="field"><span>Notes for the supplier (optional)</span><input @bind="_notes" /></label>
+            </div>
+            @if (_suppliers.Count == 0) { <p class="muted">No suppliers yet. <a href="/purchasing/suppliers">Add a supplier</a> first.</p> }
+
+            <LineEditor Lines="_lines" Products="_products" PriceLabel="Unit cost (excl. VAT)" DefaultPrice="p => p.Cost" Hint="Hint" Changed="StateHasChanged" />
+
+            <table class="totals-table">
+                <tr><td>Subtotal (excl. VAT)</td><td>@Money.Format(Net)</td></tr>
+                <tr><td>VAT</td><td>@Money.Format(Vat)</td></tr>
+                <tr class="grand"><td>Total</td><td>@Money.Format(Net + Vat)</td></tr>
+            </table>
+            @if (Net + Vat > _limit)
+            {
+                <p class="alert warn">Over the @Money.Format(_limit) approval limit: a manager will need to approve this order before it's placed.</p>
+            }
+
+            <div class="actions-row">
+                <a class="btn outline" href="@(Id is null ? "/purchasing" : $"/purchasing/orders/{Id}")">Cancel</a>
+                <button type="button" class="btn" disabled="@(!CanSave)" @onclick="() => Save(false)">Save draft</button>
+                <button type="button" class="btn primary" disabled="@(!CanSave)" @onclick="() => Save(true)">Save &amp; place order</button>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public long? Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private List<Supplier> _suppliers = [];
+    private List<Product> _products = [];
+    private List<LineEditor.Line> _lines = [];
+    private Dictionary<long, Product> _byId = [];
+    private Dictionary<long, int> _onOrder = [];
+    private long _supplierId;
+    private DateOnly? _expected;
+    private string _notes = "";
+    private decimal _limit;
+    private bool _notEditable;
+    private string? _error;
+
+    private decimal Net => _lines.Sum(l => Money.Round(l.Quantity * l.Price));
+    private decimal Vat => _lines.Sum(l => Money.Round(Money.Round(l.Quantity * l.Price) * l.VatRate));
+    private bool CanSave => _supplierId != 0 && _lines.Count > 0 && _lines.All(l => l.Quantity > 0 && l.Price >= 0);
+
+    protected override void OnInitialized()
+    {
+        _suppliers = Purchasing.Suppliers();
+        _products = Products.GetAll();
+        _byId = _products.ToDictionary(p => p.Id);
+        _onOrder = Purchasing.OnOrder();
+        _limit = Purchasing.ApprovalLimit();
+        if (Id is { } id && Purchasing.GetOrder(id) is { } po)
+        {
+            if (!po.CanEdit) { _notEditable = true; return; }
+            _supplierId = po.SupplierId;
+            _expected = po.ExpectedDate;
+            _notes = po.Notes;
+            _lines = po.Lines.Select(l => new LineEditor.Line
+            {
+                ProductId = l.ProductId, Name = l.Description, Sku = _byId.GetValueOrDefault(l.ProductId)?.Sku ?? "",
+                Quantity = l.Quantity, Price = l.UnitCost, VatRate = l.VatRate,
+            }).ToList();
+        }
+    }
+
+    private string? Hint(LineEditor.Line l) => _byId.TryGetValue(l.ProductId, out var p)
+        ? $"{p.StockQuantity} in stock{(p.ReorderLevel > 0 ? $", reorder at {p.ReorderLevel}" : "")}{(_onOrder.GetValueOrDefault(p.Id) is > 0 and var o ? $", {o} already on order" : "")} · last cost {Money.Format(p.Cost)}"
+        : null;
+
+    private async Task Save(bool submit)
+    {
+        _error = null;
+        var actor = (await AuthState).User.ToActor();
+        var lines = _lines.Select(l => new PoLineInput(l.ProductId, l.Quantity, l.Price)).ToList();
+        try
+        {
+            var id = Id ?? 0;
+            if (Id is null) id = Purchasing.CreateOrder(_supplierId, _expected, _notes, lines, actor);
+            else Purchasing.UpdateDraft(id, _supplierId, _expected, _notes, lines, actor);
+            if (submit) Purchasing.Submit(id, actor);
+            Navigation.NavigateTo($"/purchasing/orders/{id}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _error = ex.Message;
+        }
+    }
+}

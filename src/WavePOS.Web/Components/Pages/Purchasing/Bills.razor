@@ -1,0 +1,66 @@
+@page "/purchasing/bills"
+@attribute [Authorize(Policy = nameof(Permission.ViewPurchasing))]
+@rendermode InteractiveServer
+@inject PurchasingRepository Purchasing
+
+<PageTitle>Bills to pay · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="true" />
+    <h1>Bills to pay</h1>
+    <p class="muted">Supplier bills not yet paid in full, oldest due date first (aged payables). Open the purchase order to pay a bill.</p>
+
+    <AgeingTiles Items="_bills.Select(b => (b.Age(Today), b.Outstanding))" />
+
+    <div class="filters">
+        <select @bind="SupplierFilter" aria-label="Supplier">
+            <option value="0">All suppliers</option>
+            @foreach (var s in _suppliers) { <option value="@s.Id">@s.Name</option> }
+        </select>
+        <label class="check inline"><input type="checkbox" @bind="ShowPaid" /> Include paid bills</label>
+    </div>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>Supplier</th><th>Invoice</th><th>Order</th><th>Bill date</th><th>Due</th><th class="num">Total</th><th class="num">Owed</th></tr></thead>
+            <tbody>
+                @foreach (var b in _bills)
+                {
+                    <tr>
+                        <td>@b.SupplierName</td>
+                        <td>@b.SupplierInvoice</td>
+                        <td><a class="mono" href="/purchasing/orders/@b.PoId">PO@(b.PoId.ToString("D6"))</a></td>
+                        <td class="nowrap">@b.BillDate.ToString("dd MMM yyyy")</td>
+                        <td class="nowrap">@b.DueDate.ToString("dd MMM yyyy") @if (b.Outstanding > 0 && b.Age(Today) != AgeBucket.NotDue) { <span class="badge danger">@b.Age(Today).Label()</span> }</td>
+                        <td class="num">@Money.Format(b.Total)</td>
+                        <td class="num">@Money.Format(b.Outstanding)</td>
+                    </tr>
+                }
+                @if (_bills.Count == 0) { <tr><td colspan="7" class="muted empty">No bills to pay.</td></tr> }
+            </tbody>
+            <tfoot><tr><th colspan="6">Total owed</th><th class="num">@Money.Format(_bills.Sum(b => b.Outstanding))</th></tr></tfoot>
+        </table>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "supplier")] public long? SupplierQuery { get; set; }
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private List<SupplierBill> _bills = [];
+    private List<Supplier> _suppliers = [];
+    private long _supplier;
+    private bool _showPaid;
+
+    private long SupplierFilter { get => _supplier; set { _supplier = value; Load(); } }
+    private bool ShowPaid { get => _showPaid; set { _showPaid = value; Load(); } }
+
+    protected override void OnInitialized()
+    {
+        _suppliers = Purchasing.Suppliers(includeInactive: true);
+        _supplier = SupplierQuery ?? 0;
+        Load();
+    }
+
+    private void Load() => _bills = Purchasing.Bills(outstandingOnly: !_showPaid, supplierId: _supplier == 0 ? null : _supplier);
+}

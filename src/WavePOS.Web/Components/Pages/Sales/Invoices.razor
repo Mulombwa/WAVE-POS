@@ -1,0 +1,52 @@
+@page "/sales/invoices"
+@attribute [Authorize(Policy = nameof(Permission.ViewSalesOrders))]
+@rendermode InteractiveServer
+@inject SalesOrderRepository SalesOrders
+
+<PageTitle>Invoices · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="false" />
+    <h1>Invoices &amp; money owed</h1>
+    <p class="muted">Customer invoices not yet paid in full, oldest due date first (aged receivables). Open the order to record a payment.</p>
+
+    <AgeingTiles Items="_invoices.Select(i => (i.Age(Today), i.Outstanding))" />
+
+    <div class="filters">
+        <label class="check inline"><input type="checkbox" @bind="ShowPaid" /> Include paid invoices</label>
+    </div>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>Invoice</th><th>Customer</th><th>Order</th><th>Date</th><th>Due</th><th class="num">Total</th><th class="num">Owed</th></tr></thead>
+            <tbody>
+                @foreach (var i in _invoices)
+                {
+                    <tr>
+                        <td><a class="mono" href="/print/invoice/@i.Id" target="_blank" rel="noopener">@i.Number</a></td>
+                        <td><a href="/customers/@i.CustomerId">@i.CustomerName</a></td>
+                        <td><a class="mono" href="/sales/orders/@i.OrderId">SO@(i.OrderId.ToString("D6"))</a></td>
+                        <td class="nowrap">@i.Date.ToString("dd MMM yyyy")</td>
+                        <td class="nowrap">@i.DueDate.ToString("dd MMM yyyy") @if (i.Outstanding > 0 && i.Age(Today) != AgeBucket.NotDue) { <span class="badge danger">@i.Age(Today).Label()</span> }</td>
+                        <td class="num">@Money.Format(i.Total)</td>
+                        <td class="num">@Money.Format(i.Outstanding)</td>
+                    </tr>
+                }
+                @if (_invoices.Count == 0) { <tr><td colspan="7" class="muted empty">No invoices waiting for payment.</td></tr> }
+            </tbody>
+            <tfoot><tr><th colspan="6">Total owed</th><th class="num">@Money.Format(_invoices.Sum(i => i.Outstanding))</th></tr></tfoot>
+        </table>
+    </div>
+</div>
+
+@code {
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+    private List<CustomerInvoice> _invoices = [];
+    private bool _showPaid;
+
+    private bool ShowPaid { get => _showPaid; set { _showPaid = value; Load(); } }
+
+    protected override void OnInitialized() => Load();
+
+    private void Load() => _invoices = SalesOrders.Invoices(outstandingOnly: !_showPaid);
+}

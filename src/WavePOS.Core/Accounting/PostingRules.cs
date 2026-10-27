@@ -8,7 +8,7 @@ namespace WavePOS.Core.Accounting;
 /// How shop activity turns into double-entry bookkeeping. Each rule builds a balanced entry;
 /// <paramref name="account"/> looks up an account id from a <see cref="SystemAccounts"/> key.
 /// </summary>
-public static class PostingRules
+public static partial class PostingRules
 {
     public const decimal StandardVatRate = 0.16m;
 

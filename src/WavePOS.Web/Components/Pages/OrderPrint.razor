@@ -1,0 +1,228 @@
+@page "/print/{Kind}/{Id:long}"
+@attribute [Authorize]
+@layout BareLayout
+@inject PurchasingRepository Purchasing
+@inject SalesOrderRepository SalesOrders
+@inject CustomerRepository CustomerData
+@inject SettingsRepository Settings
+
+@* A4 business documents: purchase order, quotation / order confirmation, delivery note, invoice. *@
+<PageTitle>@(_doc is null ? "Not found" : $"{_doc.Title} {_doc.Number}") · WAVE POS</PageTitle>
+<HeadContent><style>@("@page { size: A4; margin: 0; }")</style></HeadContent>
+
+<div class="doc-screen">
+    <div class="doc-toolbar no-print">
+        <div>
+            <strong>@(_doc is null ? "Document not found" : $"{_doc.Title}  {_doc.Number}")</strong>
+            <span class="muted">To save as PDF, click Print and choose “Save as PDF”.</span>
+        </div>
+        @if (_doc is not null) { <div class="doc-toolbar-actions"><button type="button" class="btn primary" onclick="window.print()">Print…</button></div> }
+    </div>
+
+    @if (_doc is null)
+    {
+        <p class="doc-missing">@(_denied ? "You aren't allowed to see this document." : "That document doesn't exist.")</p>
+    }
+    else
+    {
+        <article class="doc doc-a4">
+            <header class="a4-head">
+                <div>
+                    <img class="doc-logo" src="@Branding.LogoUrl(_business)" alt="@_business.Name logo" />
+                    <div class="biz-name">@_business.Name</div>
+                    @foreach (var line in Lines(_business.Address, _business.Phone, _business.Email, _business.Tpin)) { <div class="muted">@line</div> }
+                </div>
+                <div class="right">
+                    <h1 class="doc-title">@_doc.Title</h1>
+                    <dl class="pairs right-labels">
+                        @foreach (var (label, value) in _doc.Facts) { <dt>@label</dt><dd>@value</dd> }
+                    </dl>
+                </div>
+            </header>
+
+            <section class="bill-to">
+                <div class="label">@_doc.PartyLabel</div>
+                <strong>@_doc.PartyName</strong>
+                @foreach (var line in _doc.PartyLines) { <div class="muted">@line</div> }
+            </section>
+
+            <table class="items">
+                <thead>
+                    <tr>
+                        <th>Description</th><th class="num">Qty</th>
+                        @if (_doc.ShowPrices) { <th class="num">@_doc.PriceLabel</th><th class="num">VAT</th><th class="num">Amount</th> }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _doc.Rows)
+                    {
+                        <tr>
+                            <td>@r.Description</td><td class="num">@r.Quantity</td>
+                            @if (_doc.ShowPrices)
+                            {
+                                <td class="num">@Money.Format(r.Price)</td>
+                                <td class="num">@(r.VatRate > 0 ? $"{r.VatRate * 100:0.#}%" : "0%")</td>
+                                <td class="num">@Money.Format(Money.Round(r.Quantity * r.Price))</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (_doc.ShowPrices)
+            {
+                <table class="totals">
+                    @foreach (var (label, amount, grand) in _doc.Totals)
+                    {
+                        <tr class="@(grand ? "grand" : "")"><td>@label</td><td>@Money.Format(amount)</td></tr>
+                    }
+                </table>
+            }
+            @if (_doc.Note is { } note) { <p class="muted note">@note</p> }
+            @if (_doc.Signatures)
+            {
+                <div class="signatures">
+                    <div>Delivered by<br /><br />______________________</div>
+                    <div>Received in good order by (name &amp; signature)<br /><br />______________________</div>
+                </div>
+            }
+        </article>
+    }
+    <div class="doc-footer no-print"><BuiltByWave /></div>
+</div>
+
+@code {
+    [Parameter] public string Kind { get; set; } = "";
+    [Parameter] public long Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private sealed record Row(string Description, int Quantity, decimal Price, decimal VatRate);
+
+    private sealed class Doc
+    {
+        public string Title = "", Number = "", PartyLabel = "", PartyName = "", PriceLabel = "Unit price";
+        public List<(string, string)> Facts = [];
+        public List<string> PartyLines = [];
+        public List<Row> Rows = [];
+        public List<(string, decimal, bool)> Totals = [];
+        public bool ShowPrices = true, Signatures;
+        public string? Note;
+    }
+
+    private BusinessProfile _business = new();
+    private Doc? _doc;
+    private bool _denied;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _business = Settings.GetBusinessProfile();
+        var role = (await AuthState).User.ToUser().Role;
+        var needed = Kind == "po" ? Permission.ViewPurchasing : Permission.ViewSalesOrders;
+        if (!role.Can(needed)) { _denied = true; return; }
+        _doc = Kind switch
+        {
+            "po" => PurchaseOrderDoc(),
+            "quote" => QuoteDoc(),
+            "delivery" => DeliveryDoc(),
+            "invoice" => InvoiceDoc(),
+            _ => null,
+        };
+    }
+
+    private static IEnumerable<string> Lines(string address, string phone, string email, string tpin)
+    {
+        foreach (var l in address.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) yield return l;
+        var contact = string.Join("  ·  ", new[] { phone, email }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        if (contact.Length > 0) yield return contact;
+        if (!string.IsNullOrWhiteSpace(tpin)) yield return $"TPIN: {tpin}";
+    }
+
+    private Doc? PurchaseOrderDoc()
+    {
+        if (Purchasing.GetOrder(Id) is not { } po) return null;
+        var s = Purchasing.GetSupplier(po.SupplierId)!;
+        var d = new Doc
+        {
+            Title = "Purchase order", Number = po.Number, PartyLabel = "SUPPLIER", PartyName = s.Name, PriceLabel = "Unit cost",
+            PartyLines = [.. Lines(s.Address, s.Phone, s.Email, s.Tpin)],
+            Rows = [.. po.Lines.Select(l => new Row(l.Description, l.Quantity, l.UnitCost, l.VatRate))],
+            Totals = [("Subtotal (excl. VAT)", po.Net, false), ("VAT", po.Vat, false), ("Total", po.Total, true)],
+            Note = po.Notes.Length > 0 ? po.Notes : null,
+        };
+        d.Facts.Add(("Order no.", po.Number));
+        d.Facts.Add(("Date", po.OrderDate.ToString("dd MMM yyyy")));
+        if (po.ExpectedDate is { } e) d.Facts.Add(("Deliver by", e.ToString("dd MMM yyyy")));
+        d.Facts.Add(("Payment terms", s.PaymentTermsDays == 0 ? "On receipt" : $"{s.PaymentTermsDays} days"));
+        d.Facts.Add(("Ordered by", po.CreatedByName));
+        if (po.Status is PurchaseOrderStatus.Draft or PurchaseOrderStatus.AwaitingApproval)
+            d.Note = "DRAFT: not yet approved. Do not supply against this order.";
+        return d;
+    }
+
+    private (string Name, List<string> Lines) Customer(long id)
+    {
+        var c = CustomerData.Get(id);
+        var terms = SalesOrders.GetCreditTerms(id);
+        return (c?.Name ?? "", c is null ? [] : [.. Lines(c.Address, c.Phone, c.Email, terms.Tpin)]);
+    }
+
+    private Doc? QuoteDoc()
+    {
+        if (SalesOrders.GetOrder(Id) is not { } o) return null;
+        var (name, lines) = Customer(o.CustomerId);
+        var quote = o.Status == SalesOrderStatus.Quote;
+        var d = new Doc
+        {
+            Title = quote ? "Quotation" : "Order confirmation", Number = o.Number, PartyLabel = "CUSTOMER", PartyName = name, PartyLines = lines,
+            PriceLabel = "Unit price (incl. VAT)",
+            Rows = [.. o.Lines.Select(l => new Row(l.Description, l.Quantity, l.UnitPrice, l.VatRate))],
+            Totals = [("Subtotal (excl. VAT)", o.Net, false), ("VAT", o.Vat, false), ("Total", o.Total, true)],
+            Note = quote
+                ? $"This is a quotation, not an invoice.{(o.ValidUntil is { } v ? $" Prices valid until {v:dd MMM yyyy}." : "")} {o.Notes}".Trim()
+                : (o.Notes.Length > 0 ? o.Notes : null),
+        };
+        d.Facts.Add((quote ? "Quote no." : "Order no.", o.Number));
+        d.Facts.Add(("Date", o.OrderDate.ToString("dd MMM yyyy")));
+        if (quote && o.ValidUntil is { } valid) d.Facts.Add(("Valid until", valid.ToString("dd MMM yyyy")));
+        d.Facts.Add(("Prepared by", o.CreatedByName));
+        return d;
+    }
+
+    private Doc? DeliveryDoc()
+    {
+        if (SalesOrders.GetDelivery(Id) is not { } dn || SalesOrders.GetOrder(dn.OrderId) is not { } o) return null;
+        var (name, lines) = Customer(o.CustomerId);
+        var d = new Doc
+        {
+            Title = "Delivery note", Number = dn.Number, PartyLabel = "DELIVER TO", PartyName = name, PartyLines = lines, ShowPrices = false,
+            Rows = [.. dn.Lines.Select(l => new Row(l.Description, l.Quantity, 0, 0))], Signatures = true,
+            Note = dn.Note.Length > 0 ? dn.Note : null,
+        };
+        d.Facts.Add(("Delivery no.", dn.Number));
+        d.Facts.Add(("Date", dn.Date.ToString("dd MMM yyyy")));
+        d.Facts.Add(("Order no.", o.Number));
+        d.Facts.Add(("Dispatched by", dn.UserName));
+        return d;
+    }
+
+    private Doc? InvoiceDoc()
+    {
+        if (SalesOrders.GetInvoice(Id) is not { } found) return null;
+        var (inv, invLines) = found;
+        var (name, lines) = Customer(inv.CustomerId);
+        var d = new Doc
+        {
+            Title = "Invoice", Number = inv.Number, PartyLabel = "BILL TO", PartyName = name, PartyLines = lines, PriceLabel = "Unit price (incl. VAT)",
+            Rows = [.. invLines.Select(l => new Row(l.Description, l.Quantity, l.UnitPrice, l.VatRate))],
+            Totals = [("Subtotal (excl. VAT)", inv.Total - inv.Vat, false), ("VAT", inv.Vat, false), ("Total", inv.Total, true)],
+        };
+        if (inv.Paid > 0) d.Totals.Add(("Paid", inv.Paid, false));
+        if (inv.Paid > 0) d.Totals.Add(("Balance due", inv.Outstanding, true));
+        d.Facts.Add(("Invoice no.", inv.Number));
+        d.Facts.Add(("Date", inv.Date.ToString("dd MMM yyyy")));
+        d.Facts.Add(("Due date", inv.DueDate.ToString("dd MMM yyyy")));
+        d.Facts.Add(("Order no.", $"SO{inv.OrderId:D6}"));
+        d.Note = $"Please pay by {inv.DueDate:dd MMM yyyy}, quoting {inv.Number}.";
+        return d;
+    }
+}

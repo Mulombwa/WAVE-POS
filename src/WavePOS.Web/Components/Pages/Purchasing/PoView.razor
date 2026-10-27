@@ -1,0 +1,335 @@
+@page "/purchasing/orders/{Id:long}"
+@attribute [Authorize(Policy = nameof(Permission.ViewPurchasing))]
+@rendermode InteractiveServer
+@inject PurchasingRepository Purchasing
+@inject LedgerRepository Ledger
+@inject NavigationManager Navigation
+
+<PageTitle>@(_po?.Number ?? "Purchase order") · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="true" />
+    @if (_po is null)
+    {
+        <h1>Purchase order not found</h1>
+        <a href="/purchasing">Back to purchase orders</a>
+    }
+    else
+    {
+        <div class="page-head">
+            <h1>Purchase order <span class="mono">@_po.Number</span> <PoStatusBadge Status="_po.Status" /></h1>
+            <div class="row-actions">
+                <a class="btn outline" href="/print/po/@_po.Id" target="_blank" rel="noopener">Print / PDF</a>
+                @if (_po.CanEdit && Can(Permission.ManagePurchasing)) { <a class="btn outline" href="/purchasing/orders/@_po.Id/edit">Edit</a> }
+            </div>
+        </div>
+
+        @if (_message is not null) { <div class="alert @(_isError ? "error" : "success")" role="status">@_message</div> }
+
+        <section class="card">
+            <dl class="facts">
+                <dt>Supplier</dt><dd>@_po.SupplierName</dd>
+                <dt>Order date</dt><dd>@_po.OrderDate.ToString("dd MMM yyyy")@(_po.ExpectedDate is { } e ? $" · expected {e:dd MMM yyyy}" : "")</dd>
+                <dt>Raised by</dt><dd>@_po.CreatedByName</dd>
+                @if (_po.ApprovedByName is { } by) { <dt>Approved by</dt><dd>@by on @_po.ApprovedAt?.ToString("dd MMM yyyy HH:mm")</dd> }
+                @if (_po.Notes.Length > 0) { <dt>Notes</dt><dd>@_po.Notes</dd> }
+            </dl>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Item</th><th class="num">Ordered</th><th class="num">Received</th><th class="num">Billed</th><th class="num">Unit cost</th><th class="num">VAT</th><th class="num">Amount</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in _po.Lines)
+                        {
+                            <tr>
+                                <td>@l.Description</td>
+                                <td class="num">@l.Quantity</td>
+                                <td class="num">@l.Received</td>
+                                <td class="num">@l.Billed</td>
+                                <td class="num">@Money.Format(l.UnitCost)</td>
+                                <td class="num">@($"{l.VatRate * 100:0.#}%")</td>
+                                <td class="num">@Money.Format(l.Net)</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot>
+                        <tr><th colspan="6">Subtotal (excl. VAT)</th><th class="num">@Money.Format(_po.Net)</th></tr>
+                        <tr><th colspan="6">VAT</th><th class="num">@Money.Format(_po.Vat)</th></tr>
+                        <tr><th colspan="6">Total</th><th class="num">@Money.Format(_po.Total)</th></tr>
+                    </tfoot>
+                </table>
+            </div>
+        </section>
+
+        @* ── Next steps, depending on status and who's signed in ── *@
+        @if (_po.Status == PurchaseOrderStatus.Draft && Can(Permission.ManagePurchasing))
+        {
+            <section class="card">
+                <h2>Place the order</h2>
+                <p class="muted">@(_po.Total > _limit ? $"This order is over the {Money.Format(_limit)} approval limit, so a manager will need to approve it." : "Within the approval limit: it's approved as soon as you place it.")</p>
+                <button type="button" class="btn primary" @onclick="Submit">Place order</button>
+            </section>
+        }
+
+        @if (_po.Status == PurchaseOrderStatus.AwaitingApproval)
+        {
+            <section class="card">
+                <h2>Approval</h2>
+                @if (Can(Permission.ApprovePurchases))
+                {
+                    <p class="muted">Raised by @_po.CreatedByName for @Money.Format(_po.Total). Approving lets the goods be received.</p>
+                    <div class="lookup">
+                        <button type="button" class="btn primary" @onclick="Approve">Approve</button>
+                        <label class="field grow"><span>Or send back with a reason</span><input @bind="_reason" @bind:event="oninput" /></label>
+                        <button type="button" class="btn outline" disabled="@string.IsNullOrWhiteSpace(_reason)" @onclick="Reject">Send back</button>
+                    </div>
+                }
+                else
+                {
+                    <p class="muted">Waiting for a manager to approve this order.</p>
+                }
+            </section>
+        }
+
+        @if (_po.CanReceive && Can(Permission.ManagePurchasing))
+        {
+            <section class="card">
+                <h2>Receive goods</h2>
+                <p class="muted">Count what arrived. Part deliveries are fine; the rest stays on order.</p>
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>Item</th><th class="num">Still to come</th><th class="num">Received now</th></tr></thead>
+                        <tbody>
+                            @foreach (var l in _po.Lines.Where(l => l.Outstanding > 0))
+                            {
+                                <tr>
+                                    <td>@l.Description</td>
+                                    <td class="num">@l.Outstanding</td>
+                                    <td class="num"><input class="money-input qty-input" type="number" min="0" max="@l.Outstanding" @bind="_receive[l.Id]" aria-label="Received now" /></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="lookup">
+                    <label class="field grow"><span>Note (e.g. delivery note number)</span><input @bind="_receiveNote" /></label>
+                    <button type="button" class="btn primary" @onclick="Receive">Receive into stock</button>
+                </div>
+            </section>
+        }
+
+        @if (_po.HasUnbilled)
+        {
+            <section class="card">
+                <h2>Enter the supplier's bill</h2>
+                @if (Can(Permission.ManageAccounts))
+                {
+                    <p class="muted">
+                        Bills everything received but not yet billed (@_po.Lines.Sum(l => l.ToBill) item(s),
+                        @Money.Format(_po.Lines.Sum(l => Money.Round(l.ToBill * l.UnitCost) * (1 + l.VatRate))) incl. VAT) at the ordered price.
+                        Check the supplier's invoice matches before entering it.
+                    </p>
+                    <div class="lookup">
+                        <label class="field"><span>Supplier's invoice number</span><input @bind="_billNumber" @bind:event="oninput" /></label>
+                        <label class="field"><span>Invoice date</span><input type="date" @bind="_billDate" /></label>
+                        <button type="button" class="btn primary" disabled="@string.IsNullOrWhiteSpace(_billNumber)" @onclick="EnterBill">Enter bill</button>
+                    </div>
+                }
+                else
+                {
+                    <p class="muted">Goods received and waiting for the supplier's bill. Accounts staff enter bills.</p>
+                }
+            </section>
+        }
+
+        @if (_bills.Count > 0)
+        {
+            <section class="card">
+                <h2>Bills and payments</h2>
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>Supplier invoice</th><th>Date</th><th>Due</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Owed</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var b in _bills)
+                            {
+                                <tr>
+                                    <td>@b.SupplierInvoice @if (b.JournalEntryId is { } j) { <a class="mono ref" href="/accounting/journals/@j">J@(j.ToString("D6"))</a> }</td>
+                                    <td class="nowrap">@b.BillDate.ToString("dd MMM yyyy")</td>
+                                    <td class="nowrap @(b.Outstanding > 0 && b.DueDate < Today ? "out-of-balance" : "")">@b.DueDate.ToString("dd MMM yyyy")</td>
+                                    <td class="num">@Money.Format(b.Total)</td>
+                                    <td class="num">@Money.Format(b.Paid)</td>
+                                    <td class="num">@Money.Format(b.Outstanding)</td>
+                                    <td>
+                                        @if (b.Outstanding > 0 && Can(Permission.ManageAccounts))
+                                        {
+                                            <button type="button" class="btn small" @onclick="() => StartPay(b)">Pay</button>
+                                        }
+                                        else if (b.Outstanding == 0) { <span class="badge ok">Paid</span> }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (_payments.Count > 0)
+                {
+                    <h2 class="sub">Payments</h2>
+                    <ul class="small-list">
+                        @foreach (var p in _payments)
+                        {
+                            <li>@p.Date.ToString("dd MMM yyyy"): @Money.Format(p.Amount) from @p.AccountName@(p.Reference.Length > 0 ? $" ({p.Reference})" : "") by @p.UserName
+                                @if (p.JournalEntryId is { } j) { <a class="mono ref" href="/accounting/journals/@j">J@(j.ToString("D6"))</a> }</li>
+                        }
+                    </ul>
+                }
+            </section>
+        }
+
+        @if (_receipts.Count > 0)
+        {
+            <section class="card">
+                <h2>Goods received</h2>
+                <ul class="small-list">
+                    @foreach (var r in _receipts)
+                    {
+                        <li><span class="mono">@r.Number</span> @r.Date.ToString("dd MMM yyyy") by @r.UserName:
+                            @string.Join(", ", r.Lines.Select(l => $"{l.Quantity} × {l.Description}"))@(r.Note.Length > 0 ? $" ({r.Note})" : "")</li>
+                    }
+                </ul>
+            </section>
+        }
+
+        @if (_po.Status != PurchaseOrderStatus.Cancelled && _po.Lines.All(l => l.Received == 0) && Can(Permission.ManagePurchasing))
+        {
+            <details class="card">
+                <summary>Cancel this order</summary>
+                <div class="lookup">
+                    <label class="field grow"><span>Reason</span><input @bind="_cancelReason" @bind:event="oninput" /></label>
+                    <button type="button" class="btn danger-solid" disabled="@string.IsNullOrWhiteSpace(_cancelReason)" @onclick="Cancel">Cancel order</button>
+                </div>
+            </details>
+        }
+    }
+</div>
+
+@if (_paying is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _paying = null"></div>
+    <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="pay-title">
+        <h2 id="pay-title">Pay @_paying.SupplierName</h2>
+        <p>Bill @_paying.SupplierInvoice · owed @Money.Format(_paying.Outstanding)</p>
+        <div class="two-col">
+            <label class="field"><span>Amount</span><input type="number" min="0.01" step="0.01" @bind="_payAmount" /></label>
+            <label class="field"><span>Date paid</span><input type="date" @bind="_payDate" /></label>
+        </div>
+        <label class="field">
+            <span>Paid from</span>
+            <select @bind="_payFrom">@foreach (var a in _moneyAccounts) { <option value="@a.Id">@a.Display</option> }</select>
+        </label>
+        <label class="field"><span>Reference (e.g. EFT or cheque number)</span><input @bind="_payRef" /></label>
+        <div class="modal-actions">
+            <button type="button" class="btn outline" @onclick="() => _paying = null">Cancel</button>
+            <button type="button" class="btn primary" @onclick="Pay">Record payment</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private UserRole _role;
+    private PurchaseOrder? _po;
+    private List<SupplierBill> _bills = [];
+    private List<PaymentView> _payments = [];
+    private List<GoodsReceiptView> _receipts = [];
+    private List<Account> _moneyAccounts = [];
+    private decimal _limit;
+    private Dictionary<long, int> _receive = [];
+    private string _receiveNote = "", _reason = "", _cancelReason = "", _billNumber = "", _payRef = "";
+    private DateOnly _billDate = Today, _payDate = Today;
+    private SupplierBill? _paying;
+    private decimal _payAmount;
+    private long _payFrom;
+    private string? _message;
+    private bool _isError;
+
+    private bool Can(Permission p) => _role.Can(p);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        _moneyAccounts = Ledger.MoneyAccounts();
+        _payFrom = _moneyAccounts.FirstOrDefault(a => a.SystemKey == SystemAccounts.Bank)?.Id ?? _moneyAccounts.FirstOrDefault()?.Id ?? 0;
+        Load();
+    }
+
+    private void Load()
+    {
+        _po = Purchasing.GetOrder(Id);
+        if (_po is null) return;
+        _limit = Purchasing.ApprovalLimit();
+        _bills = Purchasing.Bills(poId: Id);
+        _payments = Purchasing.Payments(Id);
+        _receipts = Purchasing.Receipts(Id);
+        _receive = _po.Lines.ToDictionary(l => l.Id, l => l.Outstanding);
+    }
+
+    private async Task Do(Action<WavePOS.Core.Audit.Actor> action, string done)
+    {
+        _message = null;
+        _isError = false;
+        try
+        {
+            action((await AuthState).User.ToActor());
+            if (done.Length > 0) _message = done;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _message = ex.Message;
+            _isError = true;
+        }
+        Load();
+    }
+
+    private async Task Submit()
+    {
+        PurchaseOrderStatus status = default;
+        await Do(a => status = Purchasing.Submit(Id, a), "");
+        if (!_isError) _message = status == PurchaseOrderStatus.Approved ? "Order placed and approved." : "Sent to a manager for approval.";
+    }
+
+    private Task Approve() => Do(a => Purchasing.Approve(Id, a), "Approved. The goods can now be received.");
+    private Task Reject() => Do(a => Purchasing.Reject(Id, _reason, a), "Sent back to draft.");
+    private Task Cancel() => Do(a => Purchasing.Cancel(Id, _cancelReason, a), "Order cancelled.");
+
+    private Task Receive() => Do(a =>
+    {
+        var id = Purchasing.Receive(Id, _receive.Where(kv => kv.Value != 0).ToDictionary(), _receiveNote, a);
+        _receiveNote = "";
+        _message = $"Received into stock as GRN{id:D6}.";
+    }, "");
+
+    private async Task EnterBill()
+    {
+        await Do(a => Purchasing.EnterBill(Id, _billNumber, _billDate, a), $"Bill {_billNumber.Trim()} entered.");
+        if (!_isError) _billNumber = "";
+    }
+
+    private void StartPay(SupplierBill b)
+    {
+        _paying = b;
+        _payAmount = b.Outstanding;
+        _payDate = Today;
+        _payRef = "";
+    }
+
+    private async Task Pay()
+    {
+        var bill = _paying!;
+        _paying = null;
+        await Do(a => Purchasing.PayBill(bill.Id, _payAmount, _payDate, _payFrom, _payRef, a),
+            $"Payment of {Money.Format(_payAmount)} recorded. It will show up for matching on the bank reconciliation page.");
+    }
+}

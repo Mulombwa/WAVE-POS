@@ -18,8 +18,23 @@ public enum Permission
     HandleDataRequests,
     /// <summary>See the books: chart of accounts, journals, financial reports, bank reconciliation.</summary>
     ViewAccounts,
-    /// <summary>Post journals, edit the chart of accounts, reconcile the bank and lock periods.</summary>
+    /// <summary>
+    /// Post journals, edit the chart of accounts, reconcile the bank and lock periods. Also enter
+    /// supplier bills, raise tax invoices and record payments (accounts staff, not buyers or sales staff).
+    /// </summary>
     ManageAccounts,
+    /// <summary>See suppliers, purchase orders and supplier bills.</summary>
+    ViewPurchasing,
+    /// <summary>Add suppliers, raise purchase orders and receive goods.</summary>
+    ManagePurchasing,
+    /// <summary>Approve purchase orders over the approval limit.</summary>
+    ApprovePurchases,
+    /// <summary>See quotes, sales orders and customer invoices.</summary>
+    ViewSalesOrders,
+    /// <summary>Raise quotes, confirm sales orders and deliver goods.</summary>
+    ManageSalesOrders,
+    /// <summary>Set customer credit limits and confirm orders over a customer's limit.</summary>
+    ManageCredit,
 }
 
 /// <summary>Who may do what. One place to change it, used by both the desktop and web apps.</summary>
@@ -30,11 +45,21 @@ public static class Permissions
     private static Dictionary<UserRole, HashSet<Permission>> Build()
     {
         HashSet<Permission> cashier = [Permission.Sell, Permission.ViewCustomers, Permission.ViewInventory];
-        HashSet<Permission> supervisor = [.. cashier, Permission.ManageCustomers, Permission.ProcessReturns, Permission.AdjustStock];
+        // Supervisors buy and sell on account (raise orders, receive and deliver goods); they don't approve
+        // their own big purchases, set credit limits or handle the money side.
+        HashSet<Permission> supervisor =
+        [
+            .. cashier, Permission.ManageCustomers, Permission.ProcessReturns, Permission.AdjustStock,
+            Permission.ViewPurchasing, Permission.ManagePurchasing, Permission.ViewSalesOrders, Permission.ManageSalesOrders,
+        ];
         HashSet<Permission> manager = [.. Enum.GetValues<Permission>()];
-        // Accountants and bookkeepers keep the books but don't ring up sales or manage staff.
+        // Accountants and bookkeepers keep the books (bills, invoices, payments) but don't ring up sales,
+        // place orders or manage staff.
         HashSet<Permission> accountant =
-            [Permission.ViewAccounts, Permission.ManageAccounts, Permission.ViewAuditLog, Permission.ViewInventory, Permission.ViewCustomers];
+        [
+            Permission.ViewAccounts, Permission.ManageAccounts, Permission.ViewAuditLog, Permission.ViewInventory, Permission.ViewCustomers,
+            Permission.ViewPurchasing, Permission.ViewSalesOrders,
+        ];
 
         return new()
         {

@@ -1,0 +1,155 @@
+@page "/sales/orders/new"
+@page "/sales/orders/{Id:long}/edit"
+@attribute [Authorize(Policy = nameof(Permission.ManageSalesOrders))]
+@rendermode InteractiveServer
+@inject SalesOrderRepository SalesOrders
+@inject CustomerRepository CustomerData
+@inject ProductRepository Products
+@inject NavigationManager Navigation
+
+<PageTitle>@(Id is null ? "New quote" : $"Edit SO{Id:D6}") · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="false" />
+    <h1>@(Id is null ? "New quote" : $"Edit quote SO{Id:D6}")</h1>
+
+    @if (_notEditable)
+    {
+        <div class="alert error" role="alert">This order has been confirmed and can't be changed. <a href="/sales/orders/@Id">Back to the order</a></div>
+    }
+    else
+    {
+        <section class="card">
+            @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+
+            <div class="field">
+                <span>Customer</span>
+                @if (_customer is { } c)
+                {
+                    <div class="chips"><span class="chip">@c.Name <span class="muted">@c.Code</span>
+                        <button type="button" class="chip-x" @onclick="() => _customer = null" aria-label="Change customer">✕</button></span></div>
+                    <p class="muted small">@CreditLine</p>
+                }
+                else
+                {
+                    <div class="add-item">
+                        <input type="search" placeholder="Search customers by name, phone or code…" @bind="CustomerSearch" @bind:event="oninput" aria-label="Find customer" />
+                        @if (_customerMatches.Count > 0)
+                        {
+                            <div class="pick-list" role="listbox">
+                                @foreach (var m in _customerMatches)
+                                {
+                                    <button type="button" role="option" @onclick="() => PickCustomer(m)"><span>@m.Name</span><span class="muted">@m.Code @m.Phone</span></button>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <p class="muted small">New customer? Add them on the <a href="/customers">Customers</a> page first.</p>
+                }
+            </div>
+
+            <div class="two-col">
+                <label class="field"><span>Quote valid until</span><input type="date" @bind="_validUntil" /></label>
+                <label class="field"><span>Notes for the customer (optional)</span><input @bind="_notes" /></label>
+            </div>
+
+            <LineEditor Lines="_lines" Products="_products" PriceLabel="Unit price (incl. VAT)" DefaultPrice="p => p.Price" Hint="Hint" Changed="StateHasChanged" />
+
+            <table class="totals-table">
+                <tr><td>Subtotal (excl. VAT)</td><td>@Money.Format(Total - Vat)</td></tr>
+                <tr><td>VAT</td><td>@Money.Format(Vat)</td></tr>
+                <tr class="grand"><td>Total</td><td>@Money.Format(Total)</td></tr>
+            </table>
+
+            <div class="actions-row">
+                <a class="btn outline" href="@(Id is null ? "/sales" : $"/sales/orders/{Id}")">Cancel</a>
+                <button type="button" class="btn primary" disabled="@(_customer is null || _lines.Count == 0)" @onclick="Save">Save quote</button>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public long? Id { get; set; }
+    [SupplyParameterFromQuery(Name = "customer")] public long? CustomerQuery { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private List<Product> _products = [];
+    private Dictionary<long, Product> _byId = [];
+    private List<LineEditor.Line> _lines = [];
+    private Dictionary<long, ProductAvailability> _availability = [];
+    private Customer? _customer;
+    private List<Customer> _customerMatches = [];
+    private string _customerSearch = "";
+    private CreditTerms? _terms;
+    private decimal _exposure;
+    private DateOnly? _validUntil = DateOnly.FromDateTime(DateTime.Today.AddDays(14));
+    private string _notes = "";
+    private bool _notEditable;
+    private string? _error;
+
+    private decimal Total => _lines.Sum(l => Money.Round(l.Quantity * l.Price));
+    private decimal Vat => _lines.Sum(l => PostingRules.VatIncluded(Money.Round(l.Quantity * l.Price), l.VatRate));
+
+    private string CustomerSearch
+    {
+        get => _customerSearch;
+        set { _customerSearch = value; _customerMatches = value.Trim().Length == 0 ? [] : CustomerData.Search(value, 8); }
+    }
+
+    private string CreditLine => _terms is null ? "" :
+        $"Owes or has on order {Money.Format(_exposure)}" +
+        (_terms.CreditLimit is { } l ? $" · credit limit {Money.Format(l)} ({Money.Format(Math.Max(l - _exposure, 0))} left)" : " · no credit limit set") +
+        $" · pays in {(_terms.PaymentTermsDays == 0 ? "cash on invoice" : $"{_terms.PaymentTermsDays} days")}";
+
+    protected override void OnInitialized()
+    {
+        _products = Products.GetAll();
+        _byId = _products.ToDictionary(p => p.Id);
+        if (Id is { } id && SalesOrders.GetOrder(id) is { } order)
+        {
+            if (!order.CanEdit) { _notEditable = true; return; }
+            PickCustomer(CustomerData.Get(order.CustomerId)!);
+            _validUntil = order.ValidUntil;
+            _notes = order.Notes;
+            _lines = order.Lines.Select(l => new LineEditor.Line
+            {
+                ProductId = l.ProductId, Name = l.Description, Sku = _byId.GetValueOrDefault(l.ProductId)?.Sku ?? "",
+                Quantity = l.Quantity, Price = l.UnitPrice, VatRate = l.VatRate,
+            }).ToList();
+        }
+        else if (CustomerQuery is { } cid && CustomerData.Get(cid) is { IsAnonymised: false } c)
+        {
+            PickCustomer(c);
+        }
+        _availability = SalesOrders.Availability(_products.Select(p => p.Id), Id);
+    }
+
+    private void PickCustomer(Customer c)
+    {
+        _customer = c;
+        _customerSearch = "";
+        _customerMatches = [];
+        _terms = SalesOrders.GetCreditTerms(c.Id);
+        _exposure = SalesOrders.Exposure(c.Id, Id);
+    }
+
+    private string? Hint(LineEditor.Line l) => _availability.TryGetValue(l.ProductId, out var a)
+        ? $"{a.OnHand} in stock" + (a.Reserved > 0 ? $", {a.Reserved} reserved for other orders" : "") +
+          (l.Quantity > a.Available ? $" · short by {l.Quantity - Math.Max(a.Available, 0)}" : "")
+        : null;
+
+    private async Task Save()
+    {
+        _error = null;
+        var actor = (await AuthState).User.ToActor();
+        var lines = _lines.Select(l => new SoLineInput(l.ProductId, l.Quantity, l.Price)).ToList();
+        try
+        {
+            var id = Id ?? SalesOrders.CreateQuote(_customer!.Id, _validUntil, _notes, lines, actor);
+            if (Id is not null) SalesOrders.UpdateQuote(id, _customer!.Id, _validUntil, _notes, lines, actor);
+            Navigation.NavigateTo($"/sales/orders/{id}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _error = ex.Message; }
+    }
+}

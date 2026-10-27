@@ -1,0 +1,14 @@
+@* Amounts outstanding by how overdue they are (aged payables / receivables). *@
+<div class="stat-grid">
+    @foreach (var bucket in Enum.GetValues<AgeBucket>())
+    {
+        var total = Items.Where(i => i.Bucket == bucket).Sum(i => i.Amount);
+        <div class="stat @(bucket != AgeBucket.NotDue && total > 0 ? (bucket >= AgeBucket.Days61To90 ? "danger" : "warn") : "")">
+            <span>@bucket.Label()</span><strong>@Money.Format(total)</strong>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IEnumerable<(AgeBucket Bucket, decimal Amount)> Items { get; set; } = [];
+}

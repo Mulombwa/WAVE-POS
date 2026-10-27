@@ -1,0 +1,83 @@
+@page "/sales"
+@attribute [Authorize(Policy = nameof(Permission.ViewSalesOrders))]
+@rendermode InteractiveServer
+@inject SalesOrderRepository SalesOrders
+
+<PageTitle>Sales orders · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="false" />
+    <div class="page-head">
+        <h1>Quotes &amp; sales orders</h1>
+        @if (_role.Can(Permission.ManageSalesOrders)) { <a class="btn primary" href="/sales/orders/new">New quote</a> }
+    </div>
+    <p class="muted">For customers buying on account or in bulk: quote, confirm, deliver, invoice, get paid. Walk-in sales stay on the till.</p>
+
+    <div class="stat-grid">
+        <button type="button" class="stat @(_filter == "Quote" ? "active" : "")" @onclick='() => SetFilter("Quote")'><span>Open quotes</span><strong>@_summary.OpenQuotes</strong></button>
+        <button type="button" class="stat @(_summary.ToDeliver > 0 ? "warn" : "") @(_filter == "deliver" ? "active" : "")" @onclick='() => SetFilter("deliver")'><span>To deliver</span><strong>@_summary.ToDeliver</strong></button>
+        <button type="button" class="stat @(_filter == "invoice" ? "active" : "")" @onclick='() => SetFilter("invoice")'><span>Delivered, not invoiced</span><strong>@_summary.ToInvoice</strong></button>
+        <a class="stat" href="/sales/invoices"><span>Owed by customers</span><strong>@Money.Format(_summary.Owed)</strong></a>
+        <a class="stat @(_summary.Overdue > 0 ? "danger" : "")" href="/sales/invoices"><span>Overdue</span><strong>@Money.Format(_summary.Overdue)</strong></a>
+    </div>
+
+    <div class="filters">
+        <select @bind="_filter" aria-label="Show">
+            <option value="">All</option>
+            <option value="open">Open</option>
+            <option value="Quote">Quotes</option>
+            <option value="deliver">To deliver</option>
+            <option value="invoice">Delivered, not invoiced</option>
+            <option value="Delivered">Fully delivered</option>
+            <option value="Cancelled">Cancelled</option>
+        </select>
+    </div>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>Order</th><th>Date</th><th>Customer</th><th>Status</th><th class="num">Delivered</th><th class="num">Total</th><th>By</th></tr></thead>
+            <tbody>
+                @foreach (var o in Shown)
+                {
+                    <tr class="@(o.Status == SalesOrderStatus.Cancelled ? "inactive" : "")">
+                        <td><a class="mono" href="/sales/orders/@o.Id">@o.Number</a></td>
+                        <td class="nowrap">@o.OrderDate.ToString("dd MMM yyyy")</td>
+                        <td>@o.CustomerName</td>
+                        <td><PoStatusBadge SalesStatus="o.Status" />@if (o.CreditOverride is not null) { <span class="badge warn" title="@o.CreditOverride">Over credit limit</span> }</td>
+                        <td class="num">@o.Lines.Sum(l => l.Delivered) / @o.Lines.Sum(l => l.Quantity)</td>
+                        <td class="num">@Money.Format(o.Total)</td>
+                        <td>@o.CreatedByName</td>
+                    </tr>
+                }
+                @if (!Shown.Any()) { <tr><td colspan="7" class="muted empty">No orders here.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private UserRole _role;
+    private List<SalesOrder> _orders = [];
+    private SalesSummary _summary = new(0, 0, 0, 0, 0);
+    private string _filter = "open";
+
+    private IEnumerable<SalesOrder> Shown => _filter switch
+    {
+        "" => _orders,
+        "open" => _orders.Where(o => o.Status is not (SalesOrderStatus.Delivered or SalesOrderStatus.Cancelled) || o.HasUninvoiced),
+        "deliver" => _orders.Where(o => o.CanDeliver),
+        "invoice" => _orders.Where(o => o.HasUninvoiced),
+        var s => _orders.Where(o => o.Status.ToString() == s),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        _orders = SalesOrders.Orders();
+        _summary = SalesOrders.Summary();
+    }
+
+    private void SetFilter(string f) => _filter = _filter == f ? "open" : f;
+}

@@ -74,6 +74,8 @@ builder.Services.AddSingleton<CustomerRepository>();
 builder.Services.AddSingleton<ReturnRepository>();
 builder.Services.AddSingleton<LedgerRepository>();
 builder.Services.AddSingleton<BankRepository>();
+builder.Services.AddSingleton<PurchasingRepository>();
+builder.Services.AddSingleton<SalesOrderRepository>();
 
 var app = builder.Build();
 

@@ -129,6 +129,10 @@ public class PosDatabase
 
         CreateRetailTables(conn);
         CreateAccountingTables(conn);
+        CreateOrderTables(conn);
+        AddColumnIfMissing(conn, "customers", "tpin", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(conn, "customers", "credit_limit_ngwee", "INTEGER");
+        AddColumnIfMissing(conn, "customers", "payment_terms_days", "INTEGER NOT NULL DEFAULT 0");
 
         if (seedSampleProducts) SeedSampleProducts(conn);
 
@@ -315,6 +319,190 @@ public class PosDatabase
 
             CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log
             BEGIN SELECT RAISE(ABORT, 'The audit log cannot be deleted from.'); END;
+            """;
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Supply chain: suppliers, purchase orders, goods received, supplier bills and payments;
+    /// sales orders (quotes), deliveries, tax invoices and customer payments.
+    /// </summary>
+    private static void CreateOrderTables(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS suppliers (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                code                TEXT    UNIQUE,
+                name                TEXT    NOT NULL,
+                tpin                TEXT    NOT NULL DEFAULT '',
+                contact_name        TEXT    NOT NULL DEFAULT '',
+                phone               TEXT    NOT NULL DEFAULT '',
+                email               TEXT    NOT NULL DEFAULT '',
+                address             TEXT    NOT NULL DEFAULT '',
+                payment_terms_days  INTEGER NOT NULL DEFAULT 30,
+                is_active           INTEGER NOT NULL DEFAULT 1,
+                notes               TEXT    NOT NULL DEFAULT '',
+                created_at          TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS purchase_orders (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                supplier_id     INTEGER NOT NULL REFERENCES suppliers(id),
+                status          TEXT    NOT NULL,
+                order_date      TEXT    NOT NULL,
+                expected_date   TEXT,
+                notes           TEXT    NOT NULL DEFAULT '',
+                created_by      INTEGER REFERENCES users(id),
+                created_by_name TEXT    NOT NULL,
+                approved_by     INTEGER REFERENCES users(id),
+                approved_by_name TEXT,
+                approved_at     TEXT,
+                created_at      TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_po_status ON purchase_orders(status);
+
+            CREATE TABLE IF NOT EXISTS purchase_order_lines (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                po_id            INTEGER NOT NULL REFERENCES purchase_orders(id),
+                product_id       INTEGER NOT NULL REFERENCES products(id),
+                description      TEXT    NOT NULL,
+                quantity         INTEGER NOT NULL CHECK (quantity > 0),
+                unit_cost_ngwee  INTEGER NOT NULL CHECK (unit_cost_ngwee >= 0),
+                vat_rate         REAL    NOT NULL,
+                received         INTEGER NOT NULL DEFAULT 0,
+                billed           INTEGER NOT NULL DEFAULT 0,
+                CHECK (received >= 0 AND received <= quantity AND billed >= 0 AND billed <= received)
+            );
+
+            CREATE TABLE IF NOT EXISTS goods_receipts (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                po_id        INTEGER NOT NULL REFERENCES purchase_orders(id),
+                received_on  TEXT    NOT NULL,
+                note         TEXT    NOT NULL DEFAULT '',
+                user_name    TEXT    NOT NULL,
+                created_at   TEXT    NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS goods_receipt_lines (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                receipt_id  INTEGER NOT NULL REFERENCES goods_receipts(id),
+                po_line_id  INTEGER NOT NULL REFERENCES purchase_order_lines(id),
+                quantity    INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS supplier_bills (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                supplier_id       INTEGER NOT NULL REFERENCES suppliers(id),
+                po_id             INTEGER NOT NULL REFERENCES purchase_orders(id),
+                supplier_invoice  TEXT    NOT NULL,
+                bill_date         TEXT    NOT NULL,
+                due_date          TEXT    NOT NULL,
+                net_ngwee         INTEGER NOT NULL,
+                vat_ngwee         INTEGER NOT NULL,
+                paid_ngwee        INTEGER NOT NULL DEFAULT 0,
+                journal_entry_id  INTEGER REFERENCES journal_entries(id),
+                user_name         TEXT    NOT NULL,
+                created_at        TEXT    NOT NULL,
+                UNIQUE (supplier_id, supplier_invoice)
+            );
+            CREATE TABLE IF NOT EXISTS supplier_bill_lines (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                bill_id          INTEGER NOT NULL REFERENCES supplier_bills(id),
+                po_line_id       INTEGER NOT NULL REFERENCES purchase_order_lines(id),
+                quantity         INTEGER NOT NULL,
+                unit_cost_ngwee  INTEGER NOT NULL,
+                vat_rate         REAL    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS supplier_payments (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                bill_id           INTEGER NOT NULL REFERENCES supplier_bills(id),
+                paid_on           TEXT    NOT NULL,
+                amount_ngwee      INTEGER NOT NULL CHECK (amount_ngwee > 0),
+                account_id        INTEGER NOT NULL REFERENCES accounts(id),
+                reference         TEXT    NOT NULL DEFAULT '',
+                journal_entry_id  INTEGER REFERENCES journal_entries(id),
+                user_name         TEXT    NOT NULL,
+                created_at        TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sales_orders (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id      INTEGER NOT NULL REFERENCES customers(id),
+                status           TEXT    NOT NULL,
+                order_date       TEXT    NOT NULL,
+                valid_until      TEXT,
+                notes            TEXT    NOT NULL DEFAULT '',
+                created_by       INTEGER REFERENCES users(id),
+                created_by_name  TEXT    NOT NULL,
+                credit_override  TEXT,
+                created_at       TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_so_status ON sales_orders(status);
+
+            CREATE TABLE IF NOT EXISTS sales_order_lines (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id          INTEGER NOT NULL REFERENCES sales_orders(id),
+                product_id        INTEGER NOT NULL REFERENCES products(id),
+                description       TEXT    NOT NULL,
+                quantity          INTEGER NOT NULL CHECK (quantity > 0),
+                unit_price_ngwee  INTEGER NOT NULL CHECK (unit_price_ngwee >= 0),
+                vat_rate          REAL    NOT NULL,
+                delivered         INTEGER NOT NULL DEFAULT 0,
+                invoiced          INTEGER NOT NULL DEFAULT 0,
+                CHECK (delivered >= 0 AND delivered <= quantity AND invoiced >= 0 AND invoiced <= delivered)
+            );
+
+            CREATE TABLE IF NOT EXISTS deliveries (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id      INTEGER NOT NULL REFERENCES sales_orders(id),
+                delivered_on  TEXT    NOT NULL,
+                note          TEXT    NOT NULL DEFAULT '',
+                user_name     TEXT    NOT NULL,
+                created_at    TEXT    NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS delivery_lines (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                delivery_id      INTEGER NOT NULL REFERENCES deliveries(id),
+                order_line_id    INTEGER NOT NULL REFERENCES sales_order_lines(id),
+                quantity         INTEGER NOT NULL,
+                unit_cost_ngwee  INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS customer_invoices (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id       INTEGER NOT NULL REFERENCES customers(id),
+                order_id          INTEGER NOT NULL REFERENCES sales_orders(id),
+                invoice_date      TEXT    NOT NULL,
+                due_date          TEXT    NOT NULL,
+                total_ngwee       INTEGER NOT NULL,
+                vat_ngwee         INTEGER NOT NULL,
+                paid_ngwee        INTEGER NOT NULL DEFAULT 0,
+                journal_entry_id  INTEGER REFERENCES journal_entries(id),
+                user_name         TEXT    NOT NULL,
+                created_at        TEXT    NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS customer_invoice_lines (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_id        INTEGER NOT NULL REFERENCES customer_invoices(id),
+                order_line_id     INTEGER NOT NULL REFERENCES sales_order_lines(id),
+                description       TEXT    NOT NULL,
+                quantity          INTEGER NOT NULL,
+                unit_price_ngwee  INTEGER NOT NULL,
+                vat_rate          REAL    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS customer_payments (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_id        INTEGER NOT NULL REFERENCES customer_invoices(id),
+                paid_on           TEXT    NOT NULL,
+                amount_ngwee      INTEGER NOT NULL CHECK (amount_ngwee > 0),
+                account_id        INTEGER NOT NULL REFERENCES accounts(id),
+                reference         TEXT    NOT NULL DEFAULT '',
+                journal_entry_id  INTEGER REFERENCES journal_entries(id),
+                user_name         TEXT    NOT NULL,
+                created_at        TEXT    NOT NULL
+            );
             """;
         cmd.ExecuteNonQuery();
     }

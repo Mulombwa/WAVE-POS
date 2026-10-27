@@ -1,0 +1,26 @@
+@* Coloured status labels for purchase and sales orders. *@
+@if (Status is { } po)
+{
+    <span class="badge @(po switch
+    {
+        PurchaseOrderStatus.AwaitingApproval => "warn",
+        PurchaseOrderStatus.Approved or PurchaseOrderStatus.PartlyReceived => "info",
+        PurchaseOrderStatus.Received => "ok",
+        _ => "",
+    })">@po.Label()</span>
+}
+else if (SalesStatus is { } so)
+{
+    <span class="badge @(so switch
+    {
+        SalesOrderStatus.Quote => "",
+        SalesOrderStatus.Confirmed or SalesOrderStatus.PartlyDelivered => "info",
+        SalesOrderStatus.Delivered => "ok",
+        _ => "",
+    })">@so.Label()</span>
+}
+
+@code {
+    [Parameter] public PurchaseOrderStatus? Status { get; set; }
+    [Parameter] public SalesOrderStatus? SalesStatus { get; set; }
+}

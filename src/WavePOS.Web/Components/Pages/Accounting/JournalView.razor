@@ -62,10 +62,7 @@
                 <h2>Reverse this journal</h2>
                 @if (s.Source.IsAutomatic())
                 {
-                    <p class="muted">
-                        This entry was posted automatically by @(s.Source == JournalSource.Stock ? "a stock change. To undo it, adjust the stock" : "the till. To undo it, process a refund").
-                        That way the books and the shop floor stay in step.
-                    </p>
+                    <p class="muted">@s.Source.UndoHint() That way the books and the business stay in step.</p>
                 }
                 else
                 {
@@ -106,6 +103,8 @@
         (JournalSource.Return, { } id) => ($"/documents/refund/{id}", $"Refund slip R{long.Parse(id):D6}", true),
         (JournalSource.Stock, { } id) => ($"/inventory/{id}", "Product stock history", false),
         (JournalSource.Bank, _) => ("/accounting/bank", "Bank reconciliation", false),
+        (JournalSource.Purchase, { } id) => ($"/purchasing/orders/{id}", $"Purchase order PO{long.Parse(id):D6}", false),
+        (JournalSource.SalesOrder, { } id) => ($"/sales/orders/{id}", $"Sales order SO{long.Parse(id):D6}", false),
         (JournalSource.Reversal, { } id) => ($"/accounting/journals/{id}", $"Reverses J{long.Parse(id):D6}", false),
         _ => null,
     };

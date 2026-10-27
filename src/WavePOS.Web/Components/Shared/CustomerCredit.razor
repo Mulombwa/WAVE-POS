@@ -1,0 +1,87 @@
+@* A customer's account: TPIN, credit limit, payment terms, what they owe and their orders. *@
+@inject SalesOrderRepository SalesOrders
+
+<section class="card">
+    <div class="page-head">
+        <h2>Account &amp; credit</h2>
+        @if (CanOrder) { <a class="btn small primary" href="/sales/orders/new?customer=@CustomerId">New quote</a> }
+    </div>
+    @if (_message is not null) { <div class="alert @(_isError ? "error" : "success")" role="status">@_message</div> }
+
+    <div class="stat-grid">
+        <div class="stat"><span>Owes (invoiced)</span><strong>@Money.Format(_owed)</strong></div>
+        <div class="stat"><span>Owes + open orders</span><strong>@Money.Format(_exposure)</strong></div>
+        <div class="stat @(_terms.CreditLimit is { } l && _exposure > l ? "danger" : "")"><span>Credit limit</span><strong>@(_terms.CreditLimit is { } lim ? Money.Format(lim) : "None")</strong></div>
+        <div class="stat"><span>Pays within</span><strong>@(_terms.PaymentTermsDays == 0 ? "On invoice" : $"{_terms.PaymentTermsDays} days")</strong></div>
+    </div>
+
+    @if (CanManageCredit)
+    {
+        <div class="lookup">
+            <label class="field"><span>ZRA TPIN (for invoices)</span><input @bind="_tpin" inputmode="numeric" maxlength="10" /></label>
+            <label class="field"><span>Credit limit (K, blank = none)</span><input type="number" min="0" step="100" @bind="_limit" /></label>
+            <label class="field"><span>Payment terms (days)</span><input type="number" min="0" max="365" @bind="_days" /></label>
+            <button type="button" class="btn" @onclick="Save">Save terms</button>
+        </div>
+    }
+    else if (_terms.Tpin.Length > 0)
+    {
+        <p class="muted">TPIN @_terms.Tpin</p>
+    }
+
+    <div class="table-wrap">
+        <table class="data">
+            <thead><tr><th>Order</th><th>Date</th><th>Status</th><th class="num">Total</th></tr></thead>
+            <tbody>
+                @foreach (var o in _orders)
+                {
+                    <tr>
+                        <td><a class="mono" href="/sales/orders/@o.Id">@o.Number</a></td>
+                        <td>@o.OrderDate.ToString("dd MMM yyyy")</td>
+                        <td><PoStatusBadge SalesStatus="o.Status" /></td>
+                        <td class="num">@Money.Format(o.Total)</td>
+                    </tr>
+                }
+                @if (_orders.Count == 0) { <tr><td colspan="4" class="muted empty">No quotes or orders yet.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public long CustomerId { get; set; }
+    [Parameter] public bool CanOrder { get; set; }
+    [Parameter] public bool CanManageCredit { get; set; }
+    [Parameter, EditorRequired] public WavePOS.Core.Audit.Actor Actor { get; set; } = default!;
+
+    private CreditTerms _terms = new("", null, 0);
+    private decimal _owed, _exposure;
+    private List<SalesOrder> _orders = [];
+    private string _tpin = "";
+    private decimal? _limit;
+    private int _days;
+    private string? _message;
+    private bool _isError;
+
+    protected override void OnParametersSet() => Load();
+
+    private void Load()
+    {
+        _terms = SalesOrders.GetCreditTerms(CustomerId);
+        _owed = SalesOrders.Invoices(outstandingOnly: true, customerId: CustomerId).Sum(i => i.Outstanding);
+        _exposure = SalesOrders.Exposure(CustomerId);
+        _orders = SalesOrders.Orders(customerId: CustomerId);
+        (_tpin, _limit, _days) = (_terms.Tpin, _terms.CreditLimit, _terms.PaymentTermsDays);
+    }
+
+    private void Save()
+    {
+        try
+        {
+            SalesOrders.SetCreditTerms(CustomerId, new CreditTerms(_tpin, _limit, _days), Actor);
+            (_message, _isError) = ("Credit terms saved.", false);
+            Load();
+        }
+        catch (ArgumentException ex) { (_message, _isError) = (ex.Message, true); }
+    }
+}

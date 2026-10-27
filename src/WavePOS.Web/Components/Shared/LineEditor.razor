@@ -1,0 +1,97 @@
+@* Item lines for purchase and sales orders: search for products to add, then set quantity and price. *@
+<div class="line-editor">
+    <div class="add-item">
+        <input type="search" placeholder="Add an item: type a name, SKU or barcode…" @bind="_search" @bind:event="oninput"
+               @onkeydown="OnKey" aria-label="Add an item" />
+        @if (Matches.Count > 0)
+        {
+            <div class="pick-list" role="listbox">
+                @foreach (var p in Matches)
+                {
+                    <button type="button" role="option" @onclick="() => Add(p)">
+                        <span>@p.Name</span><span class="muted mono">@p.Sku</span>
+                    </button>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="table-wrap">
+        <table class="data journal-lines">
+            <thead>
+                <tr><th>Item</th><th class="num">Qty</th><th class="num">@PriceLabel</th><th class="num">VAT</th><th class="num">Amount</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var line in Lines)
+                {
+                    <tr>
+                        <td>
+                            @line.Name <span class="muted mono ref">@line.Sku</span>
+                            @if (Hint?.Invoke(line) is { } hint) { <div class="muted small">@hint</div> }
+                        </td>
+                        <td class="num"><input class="money-input qty-input" type="number" min="1" step="1" @bind="line.Quantity" @bind:event="oninput" @bind:after="NotifyChanged" aria-label="Quantity" /></td>
+                        <td class="num"><input class="money-input" type="number" min="0" step="0.01" @bind="line.Price" @bind:event="oninput" @bind:after="NotifyChanged" aria-label="@PriceLabel" /></td>
+                        <td class="num">@(line.VatRate > 0 ? $"{line.VatRate * 100:0.#}%" : "0%")</td>
+                        <td class="num">@Money.Format(line.Quantity * line.Price)</td>
+                        <td><button type="button" class="btn outline small" @onclick="() => Remove(line)" aria-label="Remove @line.Name">✕</button></td>
+                    </tr>
+                }
+                @if (Lines.Count == 0) { <tr><td colspan="6" class="muted empty">No items yet. Search above to add some.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    public sealed class Line
+    {
+        public long ProductId { get; set; }
+        public string Name { get; set; } = "";
+        public string Sku { get; set; } = "";
+        public int Quantity { get; set; } = 1;
+        public decimal Price { get; set; }
+        public decimal VatRate { get; set; }
+    }
+
+    [Parameter, EditorRequired] public List<Line> Lines { get; set; } = [];
+    [Parameter, EditorRequired] public List<Product> Products { get; set; } = [];
+    [Parameter] public string PriceLabel { get; set; } = "Unit price";
+
+    /// <summary>Starting price for a newly added product (cost for purchases, shelf price for sales).</summary>
+    [Parameter] public Func<Product, decimal> DefaultPrice { get; set; } = p => p.Price;
+
+    /// <summary>Extra information under each item, e.g. stock available.</summary>
+    [Parameter] public Func<Line, string?>? Hint { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private string _search = "";
+
+    private Task NotifyChanged() => Changed.InvokeAsync();
+
+    private List<Product> Matches => _search.Trim().Length < 1 ? [] : Products
+        .Where(p => p.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+                 || p.Sku.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+                 || (p.Barcode ?? "") == _search.Trim())
+        .Take(8).ToList();
+
+    private async Task Add(Product p)
+    {
+        // Adding the same product again just adds one more.
+        if (Lines.FirstOrDefault(l => l.ProductId == p.Id) is { } existing) existing.Quantity++;
+        else Lines.Add(new Line { ProductId = p.Id, Name = p.Name, Sku = p.Sku, Price = DefaultPrice(p), VatRate = p.VatRate });
+        _search = "";
+        await Changed.InvokeAsync();
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        // Enter adds the only match, so a barcode scanner works here too.
+        if (e.Key == "Enter" && Matches.Count == 1) await Add(Matches[0]);
+    }
+
+    private async Task Remove(Line line)
+    {
+        Lines.Remove(line);
+        await Changed.InvokeAsync();
+    }
+}

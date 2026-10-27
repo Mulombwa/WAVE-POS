@@ -80,4 +80,27 @@ public static class AuditActions
     public const string BankMatched = "bank.matched";
     public const string BankCategorised = "bank.posted";
     public const string BankExcluded = "bank.excluded";
+
+    public const string SupplierCreated = "purchasing.supplier_created";
+    public const string SupplierUpdated = "purchasing.supplier_updated";
+    public const string PurchaseOrderCreated = "purchasing.po_created";
+    public const string PurchaseOrderChanged = "purchasing.po_changed";
+    public const string PurchaseOrderSubmitted = "purchasing.po_submitted";
+    public const string PurchaseOrderApproved = "purchasing.po_approved";
+    public const string PurchaseOrderRejected = "purchasing.po_rejected";
+    public const string PurchaseOrderCancelled = "purchasing.po_cancelled";
+    public const string GoodsReceived = "purchasing.goods_received";
+    public const string SupplierBillEntered = "purchasing.bill_entered";
+    public const string SupplierPaid = "purchasing.supplier_paid";
+    public const string ApprovalLimitChanged = "purchasing.approval_limit";
+
+    public const string QuoteCreated = "orders.quote_created";
+    public const string QuoteChanged = "orders.quote_changed";
+    public const string OrderConfirmed = "orders.confirmed";
+    public const string CreditOverride = "orders.credit_override";
+    public const string OrderCancelled = "orders.cancelled";
+    public const string OrderDelivered = "orders.delivered";
+    public const string InvoiceRaised = "orders.invoiced";
+    public const string PaymentReceived = "orders.payment_received";
+    public const string CreditTermsChanged = "orders.credit_terms";
 }

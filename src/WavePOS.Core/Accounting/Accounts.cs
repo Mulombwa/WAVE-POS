@@ -62,6 +62,7 @@ public static class SystemAccounts
     public const string Inventory = "inventory";
     public const string VatInput = "vat_input";
     public const string Payables = "payables";
+    public const string GoodsReceived = "goods_received";
     public const string VatOutput = "vat_output";
     public const string OwnerCapital = "owner_capital";
     public const string OpeningBalances = "opening_balances";
@@ -97,6 +98,8 @@ public static class DefaultChart
         new("1300", "VAT input (claimable)", AccountType.Asset, SystemAccounts.VatInput, Description: "VAT paid on purchases, claimed back from ZRA."),
         new("1500", "Equipment & fittings", AccountType.Asset),
         new("2000", "Accounts payable", AccountType.Liability, SystemAccounts.Payables, Description: "Money owed to suppliers."),
+        new("2010", "Goods received not yet billed", AccountType.Liability, SystemAccounts.GoodsReceived,
+            Description: "Stock delivered against a purchase order whose supplier bill hasn't been entered yet."),
         new("2100", "VAT output (owed to ZRA)", AccountType.Liability, SystemAccounts.VatOutput, Description: "VAT charged on sales."),
         new("2200", "PAYE & NAPSA payable", AccountType.Liability),
         new("2300", "Loans", AccountType.Liability),

@@ -1,0 +1,21 @@
+@* Sub-menu for the purchasing or sales order pages. *@
+<nav class="subnav" aria-label="@(Purchasing ? "Purchasing" : "Sales orders")">
+    @if (Purchasing)
+    {
+        <NavLink href="/purchasing" Match="NavLinkMatch.All">Purchase orders</NavLink>
+        <NavLink href="/purchasing/suppliers">Suppliers</NavLink>
+        <NavLink href="/purchasing/bills">Bills to pay</NavLink>
+        <NavLink href="/purchasing/reorder">Reorder suggestions</NavLink>
+    }
+    else
+    {
+        <NavLink href="/sales" Match="NavLinkMatch.All">Quotes &amp; orders</NavLink>
+        <NavLink href="/sales/invoices">Invoices &amp; money owed</NavLink>
+        <NavLink href="/customers">Customers</NavLink>
+    }
+</nav>
+
+@code {
+    /// <summary>True for purchasing, false for sales.</summary>
+    [Parameter] public bool Purchasing { get; set; }
+}

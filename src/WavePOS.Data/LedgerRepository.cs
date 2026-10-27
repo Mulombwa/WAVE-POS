@@ -190,9 +190,7 @@ public class LedgerRepository(PosDatabase db)
         using var tx = conn.BeginTransaction();
         var entry = GetEntry(conn, tx, entryId) ?? throw new InvalidOperationException("Journal not found.");
         if (entry.Summary.Source.IsAutomatic())
-            throw new InvalidOperationException(entry.Summary.Source == JournalSource.Stock
-                ? "This entry came from a stock change. Adjust the stock instead."
-                : "This entry came from the till. Process a refund instead.");
+            throw new InvalidOperationException(entry.Summary.Source.UndoHint());
         if (entry.Summary.ReversedById is { } already) throw new InvalidOperationException($"Already reversed by J{already:D6}.");
         if (entry.Summary.Source == JournalSource.Reversal) throw new InvalidOperationException("This is already a reversal. Post a new journal instead.");
 
@@ -299,7 +297,11 @@ public class LedgerRepository(PosDatabase db)
     {
         using var count = conn.CreateCommand();
         count.CommandText = "SELECT COUNT(*) FROM accounts;";
-        if ((long)count.ExecuteScalar()! > 0) return;
+        if ((long)count.ExecuteScalar()! > 0)
+        {
+            AddMissingSystemAccounts(conn);
+            return;
+        }
 
         using var tx = conn.BeginTransaction();
         foreach (var a in DefaultChart.Accounts)
@@ -342,6 +344,49 @@ public class LedgerRepository(PosDatabase db)
         }
         tx.Commit();
     }
+
+    /// <summary>
+    /// Upgrades: adds system accounts introduced by newer versions (e.g. Goods received not yet
+    /// billed). If the default code is taken by the business's own account, a free code is used.
+    /// </summary>
+    private static void AddMissingSystemAccounts(SqliteConnection conn)
+    {
+        foreach (var a in DefaultChart.Accounts.Where(a => a.Key is not null))
+        {
+            using var exists = conn.CreateCommand();
+            exists.CommandText = "SELECT COUNT(*) FROM accounts WHERE system_key = $k;";
+            exists.Parameters.AddWithValue("$k", a.Key);
+            if ((long)exists.ExecuteScalar()! > 0) continue;
+
+            var code = a.Code;
+            for (var n = 1; ; n++)
+            {
+                using var taken = conn.CreateCommand();
+                taken.CommandText = "SELECT COUNT(*) FROM accounts WHERE code = $c;";
+                taken.Parameters.AddWithValue("$c", code);
+                if ((long)taken.ExecuteScalar()! == 0) break;
+                code = $"{a.Code}-{n}";
+            }
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO accounts (code, name, type, system_key, is_bank, is_active, description, created_at)
+                VALUES ($code, $name, $type, $key, $bank, 1, $desc, $now);
+                """;
+            cmd.Parameters.AddWithValue("$code", code);
+            cmd.Parameters.AddWithValue("$name", a.Name);
+            cmd.Parameters.AddWithValue("$type", a.Type.ToString());
+            cmd.Parameters.AddWithValue("$key", a.Key);
+            cmd.Parameters.AddWithValue("$bank", a.IsBank ? 1 : 0);
+            cmd.Parameters.AddWithValue("$desc", a.Description);
+            cmd.Parameters.AddWithValue("$now", Now());
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>Accounts money can be paid from or into: cash and bank / mobile-money accounts.</summary>
+    public List<Account> MoneyAccounts() =>
+        Accounts(includeInactive: false).Where(a => a.IsBank || a.SystemKey == SystemAccounts.Cash).ToList();
 
     // ── Reading journals ────────────────────────────────────────────────
 
@@ -445,7 +490,7 @@ public class LedgerRepository(PosDatabase db)
     public BalanceSheet BalanceSheet(DateOnly asAt) => FinancialReports.BalanceSheet(asAt, Balances(null, asAt));
 
     /// <summary>
-    /// Figures for the ZRA VAT return: VAT from the ledger, and till sales (less refunds) split
+    /// Figures for the ZRA VAT return: VAT from the ledger, and sales (till sales less refunds, plus tax invoices) split
     /// into standard-rated (16%) and zero-rated or exempt, excluding VAT.
     /// </summary>
     public VatSummary Vat(DateOnly from, DateOnly to)
@@ -464,6 +509,10 @@ public class LedgerRepository(PosDatabase db)
                 SELECT rl.vat_rate, -rl.unit_price_ngwee * rl.quantity
                 FROM return_lines rl JOIN returns r ON r.id = rl.return_id
                 WHERE substr(r.timestamp, 1, 10) BETWEEN $from AND $to
+                UNION ALL
+                SELECT il.vat_rate, il.unit_price_ngwee * il.quantity
+                FROM customer_invoice_lines il JOIN customer_invoices i ON i.id = il.invoice_id
+                WHERE i.invoice_date BETWEEN $from AND $to
             ) GROUP BY vat_rate;
             """;
         cmd.Parameters.AddWithValue("$from", Day(from));

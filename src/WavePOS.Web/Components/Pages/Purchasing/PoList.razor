@@ -1,0 +1,135 @@
+@page "/purchasing"
+@attribute [Authorize(Policy = nameof(Permission.ViewPurchasing))]
+@rendermode InteractiveServer
+@inject PurchasingRepository Purchasing
+
+<PageTitle>Purchasing · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="true" />
+    <div class="page-head">
+        <h1>Purchase orders</h1>
+        @if (_role.Can(Permission.ManagePurchasing))
+        {
+            <div class="row-actions">
+                <a class="btn outline" href="/purchasing/reorder">Reorder suggestions</a>
+                <a class="btn primary" href="/purchasing/orders/new">New purchase order</a>
+            </div>
+        }
+    </div>
+
+    <div class="stat-grid">
+        <button type="button" class="stat @(_summary.AwaitingApproval > 0 ? "warn" : "") @(_filter == "approval" ? "active" : "")" @onclick='() => SetFilter("approval")'>
+            <span>Waiting for approval</span><strong>@_summary.AwaitingApproval</strong>
+        </button>
+        <button type="button" class="stat @(_filter == "delivery" ? "active" : "")" @onclick='() => SetFilter("delivery")'>
+            <span>Waiting for delivery</span><strong>@_summary.AwaitingDelivery</strong>
+        </button>
+        <button type="button" class="stat @(_filter == "bill" ? "active" : "")" @onclick='() => SetFilter("bill")'>
+            <span>Received, not yet billed</span><strong>@_summary.ToBill</strong>
+        </button>
+        <a class="stat" href="/purchasing/bills"><span>Owed to suppliers</span><strong>@Money.Format(_summary.Owed)</strong></a>
+        <a class="stat @(_summary.Overdue > 0 ? "danger" : "")" href="/purchasing/bills"><span>Overdue</span><strong>@Money.Format(_summary.Overdue)</strong></a>
+    </div>
+
+    <div class="filters">
+        <select @bind="Filter" aria-label="Show">
+            <option value="">All orders</option>
+            <option value="open">Open orders</option>
+            <option value="approval">Waiting for approval</option>
+            <option value="delivery">Waiting for delivery</option>
+            <option value="bill">Received, not yet billed</option>
+            <option value="Draft">Drafts</option>
+            <option value="Received">Fully received</option>
+            <option value="Cancelled">Cancelled</option>
+        </select>
+        <span class="muted">
+            Orders over <strong>@Money.Format(_limit)</strong> need a manager's approval.
+            @if (_role.Can(Permission.ApprovePurchases)) { <button type="button" class="btn small outline" @onclick="() => _editingLimit = !_editingLimit">Change</button> }
+        </span>
+    </div>
+    @if (_editingLimit)
+    {
+        <div class="card lookup">
+            <label class="field"><span>Approval limit (K, incl. VAT)</span><input type="number" min="0" step="100" @bind="_newLimit" /></label>
+            <button type="button" class="btn primary" @onclick="SaveLimit">Save</button>
+            <span class="muted">Set 0 to make every order need approval.</span>
+            @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+        </div>
+    }
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>Order</th><th>Date</th><th>Supplier</th><th>Status</th><th class="num">Received</th><th class="num">Total</th><th>Raised by</th></tr></thead>
+            <tbody>
+                @foreach (var o in Shown)
+                {
+                    var ordered = o.Lines.Sum(l => l.Quantity);
+                    <tr class="@(o.Status == PurchaseOrderStatus.Cancelled ? "inactive" : "")">
+                        <td><a class="mono" href="/purchasing/orders/@o.Id">@o.Number</a></td>
+                        <td class="nowrap">@o.OrderDate.ToString("dd MMM yyyy")</td>
+                        <td>@o.SupplierName</td>
+                        <td><PoStatusBadge Status="o.Status" /></td>
+                        <td class="num">@o.Lines.Sum(l => l.Received) / @ordered</td>
+                        <td class="num">@Money.Format(o.Total)</td>
+                        <td>@o.CreatedByName</td>
+                    </tr>
+                }
+                @if (!Shown.Any()) { <tr><td colspan="7" class="muted empty">No purchase orders here.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "show")] public string? ShowQuery { get; set; }
+
+    private UserRole _role;
+    private List<PurchaseOrder> _orders = [];
+    private PurchasingSummary _summary = new(0, 0, 0, 0, 0);
+    private string _filter = "open";
+    private decimal _limit, _newLimit;
+    private bool _editingLimit;
+    private string? _error;
+
+    private string Filter { get => _filter; set => _filter = value; }
+
+    private IEnumerable<PurchaseOrder> Shown => _filter switch
+    {
+        "" => _orders,
+        "open" => _orders.Where(o => o.Status is not (PurchaseOrderStatus.Received or PurchaseOrderStatus.Cancelled) || o.HasUnbilled),
+        "approval" => _orders.Where(o => o.Status == PurchaseOrderStatus.AwaitingApproval),
+        "delivery" => _orders.Where(o => o.CanReceive),
+        "bill" => _orders.Where(o => o.HasUnbilled),
+        var s => _orders.Where(o => o.Status.ToString() == s),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        if (ShowQuery is { Length: > 0 }) _filter = ShowQuery;
+        Load();
+    }
+
+    private void Load()
+    {
+        _orders = Purchasing.Orders();
+        _summary = Purchasing.Summary();
+        _limit = _newLimit = Purchasing.ApprovalLimit();
+    }
+
+    private void SetFilter(string f) => _filter = _filter == f ? "open" : f;
+
+    private async Task SaveLimit()
+    {
+        _error = null;
+        try
+        {
+            Purchasing.SetApprovalLimit(_newLimit, (await AuthState).User.ToActor());
+            _editingLimit = false;
+            Load();
+        }
+        catch (ArgumentException ex) { _error = ex.Message; }
+    }
+}

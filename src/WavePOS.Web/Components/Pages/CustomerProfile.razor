@@ -89,6 +89,11 @@
                 }
             </section>
         </div>
+
+        @if (_canSeeAccount && !_customer.IsAnonymised)
+        {
+            <CustomerCredit CustomerId="Id" Actor="_actor" CanOrder="_canOrder" CanManageCredit="_canManageCredit" />
+        }
     }
 </div>
 
@@ -99,7 +104,7 @@
     private Customer? _customer;
     private Customer _edit = new();
     private List<(long Id, DateTime Date, decimal Total, PaymentMethod Method, int Items)> _purchases = [];
-    private bool _canManage, _canHandleRequests, _confirmAnonymise;
+    private bool _canManage, _canHandleRequests, _confirmAnonymise, _canSeeAccount, _canOrder, _canManageCredit;
     private string? _message;
     private bool _messageIsError;
     private WavePOS.Core.Audit.Actor _actor = WavePOS.Core.Audit.Actor.System;
@@ -111,6 +116,9 @@
         _actor = user.ToActor();
         _canManage = role.Can(Permission.ManageCustomers);
         _canHandleRequests = role.Can(Permission.HandleDataRequests);
+        _canSeeAccount = role.Can(Permission.ViewSalesOrders);
+        _canOrder = role.Can(Permission.ManageSalesOrders);
+        _canManageCredit = role.Can(Permission.ManageCredit);
         Load();
         if (_customer is not null) CustomerData.LogViewed(Id, _actor); // access to personal data is recorded
     }

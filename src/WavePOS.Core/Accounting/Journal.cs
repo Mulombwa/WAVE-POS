@@ -14,6 +14,10 @@ public enum JournalSource
     Opening,
     /// <summary>Cancels an earlier entry. Posted entries are never edited or deleted.</summary>
     Reversal,
+    /// <summary>Goods received, supplier bills and supplier payments against a purchase order.</summary>
+    Purchase,
+    /// <summary>Deliveries, tax invoices and customer payments against a sales order.</summary>
+    SalesOrder,
 }
 
 public static class JournalSources
@@ -26,15 +30,27 @@ public static class JournalSources
         JournalSource.Bank => "Bank",
         JournalSource.Opening => "Opening balance",
         JournalSource.Reversal => "Reversal",
+        JournalSource.Purchase => "Purchasing",
+        JournalSource.SalesOrder => "Sales order",
         _ => "Sale",
     };
 
     /// <summary>
-    /// Entries the till and stock screens post automatically. To undo them, refund the sale or
-    /// adjust the stock instead, so the books and the shop floor stay in step.
+    /// Entries posted automatically by the till, stock and order screens. They're undone there
+    /// (a refund, a stock adjustment), so the books and the business stay in step.
     /// </summary>
     public static bool IsAutomatic(this JournalSource source) =>
-        source is JournalSource.Sale or JournalSource.Return or JournalSource.Stock;
+        source is JournalSource.Sale or JournalSource.Return or JournalSource.Stock
+            or JournalSource.Purchase or JournalSource.SalesOrder;
+
+    /// <summary>Where to undo an automatic entry, for messages.</summary>
+    public static string UndoHint(this JournalSource source) => source switch
+    {
+        JournalSource.Stock => "This entry came from a stock change. Adjust the stock instead.",
+        JournalSource.Purchase => "This entry came from purchasing (goods received, a supplier bill or payment), so it can't be reversed here.",
+        JournalSource.SalesOrder => "This entry came from a sales order (delivery, invoice or payment), so it can't be reversed here.",
+        _ => "This entry came from the till. Process a refund instead.",
+    };
 }
 
 public record JournalLineDraft(long AccountId, decimal Debit, decimal Credit, string Description = "");

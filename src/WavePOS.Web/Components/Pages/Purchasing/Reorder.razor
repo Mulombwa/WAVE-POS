@@ -1,0 +1,92 @@
+@page "/purchasing/reorder"
+@attribute [Authorize(Policy = nameof(Permission.ViewPurchasing))]
+@rendermode InteractiveServer
+@inject PurchasingRepository Purchasing
+@inject NavigationManager Navigation
+
+<PageTitle>Reorder suggestions · WAVE POS</PageTitle>
+
+<div class="page">
+    <OrdersNav Purchasing="true" />
+    <h1>Reorder suggestions</h1>
+    <p class="muted">
+        Items at or below their reorder level, counting what's already on order. The suggestion tops stock up to twice the
+        reorder level. Set reorder levels on each product in Inventory.
+    </p>
+
+    @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th></th><th>Item</th><th class="num">In stock</th><th class="num">Reorder level</th><th class="num">On order</th><th class="num">Order</th><th class="num">Last cost</th></tr></thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr>
+                        <td><input type="checkbox" @bind="row.Selected" aria-label="Order @row.Suggestion.Product.Name" /></td>
+                        <td><a href="/inventory/@row.Suggestion.Product.Id">@row.Suggestion.Product.Name</a> <span class="muted mono ref">@row.Suggestion.Product.Sku</span></td>
+                        <td class="num">@row.Suggestion.Product.StockQuantity</td>
+                        <td class="num">@row.Suggestion.Product.ReorderLevel</td>
+                        <td class="num">@row.Suggestion.OnOrder</td>
+                        <td class="num"><input class="money-input qty-input" type="number" min="1" @bind="row.Quantity" aria-label="Quantity to order" /></td>
+                        <td class="num">@Money.Format(row.Suggestion.Product.Cost)</td>
+                    </tr>
+                }
+                @if (_rows.Count == 0) { <tr><td colspan="7" class="muted empty">Nothing needs reordering.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_rows.Count > 0 && _canManage)
+    {
+        <div class="card lookup">
+            <label class="field">
+                <span>Order from</span>
+                <select @bind="_supplierId">
+                    <option value="0">Choose a supplier…</option>
+                    @foreach (var s in _suppliers) { <option value="@s.Id">@s.Name</option> }
+                </select>
+            </label>
+            <button type="button" class="btn primary" disabled="@(_supplierId == 0 || !_rows.Any(r => r.Selected && r.Quantity > 0))" @onclick="Create">
+                Create draft purchase order (@_rows.Count(r => r.Selected) item(s))
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private sealed class Row(ReorderSuggestion s)
+    {
+        public ReorderSuggestion Suggestion { get; } = s;
+        public bool Selected { get; set; } = true;
+        public int Quantity { get; set; } = s.Suggested;
+    }
+
+    private List<Row> _rows = [];
+    private List<Supplier> _suppliers = [];
+    private long _supplierId;
+    private bool _canManage;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = (await AuthState).User.ToUser().Role.Can(Permission.ManagePurchasing);
+        _rows = Purchasing.ReorderSuggestions().Select(s => new Row(s)).ToList();
+        _suppliers = Purchasing.Suppliers();
+    }
+
+    private async Task Create()
+    {
+        _error = null;
+        try
+        {
+            var lines = _rows.Where(r => r.Selected && r.Quantity > 0)
+                .Select(r => new PoLineInput(r.Suggestion.Product.Id, r.Quantity, r.Suggestion.Product.Cost)).ToList();
+            var id = Purchasing.CreateOrder(_supplierId, null, "", lines, (await AuthState).User.ToActor());
+            Navigation.NavigateTo($"/purchasing/orders/{id}/edit");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _error = ex.Message; }
+    }
+}
