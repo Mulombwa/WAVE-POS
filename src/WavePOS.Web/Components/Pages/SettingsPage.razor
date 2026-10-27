@@ -1,0 +1,170 @@
+@page "/settings"
+@attribute [Authorize(Policy = UserClaims.ManagerPolicy)]
+@rendermode InteractiveServer
+@inject SettingsRepository Settings
+@inject PosDatabase Db
+@inject NavigationManager Navigation
+
+<PageTitle>Settings · WAVE POS</PageTitle>
+
+<div class="settings">
+    <h1>Settings</h1>
+
+    @if (_saved)
+    {
+        <div class="alert success" role="status">Settings saved.</div>
+    }
+    @if (_error is not null)
+    {
+        <div class="alert error" role="alert">@_error</div>
+    }
+
+    <section class="card">
+        <h2>Logo</h2>
+        <p class="muted">Shown on the sign-in page, the till and printed receipts and invoices. PNG or JPG up to 2 MB, ideally on a white or transparent background.</p>
+        <div class="logo-row">
+            <div class="logo-preview">
+                <img src="@LogoPreviewSrc" alt="Logo preview" />
+            </div>
+            <div class="logo-actions">
+                <strong>@(_useWaveLogo ? "Using the Wave logo" : "Using your logo")</strong>
+                <label class="btn outline file-btn">
+                    Upload your logo…
+                    <InputFile OnChange="OnLogoChosen" accept=".png,.jpg,.jpeg,image/png,image/jpeg" />
+                </label>
+                @if (!_useWaveLogo)
+                {
+                    <button type="button" class="btn small" @onclick="UseWaveLogo">Use the Wave logo</button>
+                }
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Business details</h2>
+        <p class="muted">Printed at the top of receipts and invoices.</p>
+        <label class="field"><span>Business name</span><input @bind="_profile.Name" /></label>
+        <label class="field"><span>Address</span><textarea rows="2" @bind="_profile.Address"></textarea></label>
+        <div class="two-col">
+            <label class="field"><span>Phone</span><input @bind="_profile.Phone" /></label>
+            <label class="field"><span>Email</span><input type="email" @bind="_profile.Email" /></label>
+        </div>
+        <label class="field"><span>TPIN (ZRA taxpayer number)</span><input @bind="_profile.Tpin" /></label>
+        <label class="field"><span>Message at the bottom of receipts</span><input @bind="_profile.ReceiptFooter" /></label>
+    </section>
+
+    <section class="card">
+        <h2>Printing</h2>
+        <p class="muted">In the browser, the printer is chosen in the print dialog. Choose “Save as PDF” there to get a PDF.</p>
+        <div class="two-col">
+            <label class="field">
+                <span>Receipt paper</span>
+                <select @bind="_print.ReceiptPaper">
+                    <option value="@PaperSize.Receipt80mm">80mm receipt roll</option>
+                    <option value="@PaperSize.A4">A4 page</option>
+                </select>
+            </label>
+            <label class="field">
+                <span>Invoice paper</span>
+                <select @bind="_print.InvoicePaper">
+                    <option value="@PaperSize.Receipt80mm">80mm receipt roll</option>
+                    <option value="@PaperSize.A4">A4 page</option>
+                </select>
+            </label>
+        </div>
+        <label class="check"><input type="checkbox" @bind="_print.AutoPrintReceipt" /> Print a receipt automatically after every sale</label>
+    </section>
+
+    <div class="settings-actions">
+        <a class="btn" href="/">Cancel</a>
+        <button type="button" class="btn primary" @onclick="Save">Save</button>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "saved")] public int? SavedQuery { get; set; }
+
+    private BusinessProfile _profile = new();
+    private PrintSettings _print = new();
+    private bool _useWaveLogo;
+    private byte[]? _pendingLogo;
+    private string? _pendingExtension;
+    private string? _error;
+    private bool _saved;
+
+    protected override void OnInitialized()
+    {
+        _profile = Settings.GetBusinessProfile();
+        _print = Settings.GetPrintSettings();
+        _useWaveLogo = !_profile.HasCustomLogo;
+        _saved = SavedQuery == 1;
+    }
+
+    private string LogoPreviewSrc =>
+        _pendingLogo is not null
+            ? $"data:{(_pendingExtension == ".png" ? "image/png" : "image/jpeg")};base64,{Convert.ToBase64String(_pendingLogo)}"
+            : _useWaveLogo ? "/img/wave-logo.svg" : Branding.LogoUrl(_profile);
+
+    private async Task OnLogoChosen(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        _saved = false;
+        var file = e.File;
+        if (file.Size > LogoUpload.MaxBytes)
+        {
+            _error = "That logo is bigger than 2 MB. Please use a smaller image.";
+            return;
+        }
+
+        using var stream = file.OpenReadStream(LogoUpload.MaxBytes);
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory);
+        var data = memory.ToArray();
+
+        // Check the actual file content, not just its name.
+        var extension = LogoUpload.DetectExtension(data);
+        if (extension is null)
+        {
+            _error = "That file isn't a PNG or JPG picture.";
+            return;
+        }
+
+        _pendingLogo = data;
+        _pendingExtension = extension;
+        _useWaveLogo = false;
+    }
+
+    private void UseWaveLogo()
+    {
+        _pendingLogo = null;
+        _pendingExtension = null;
+        _useWaveLogo = true;
+    }
+
+    private void Save()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_profile.Name))
+        {
+            _error = "Enter the business name.";
+            return;
+        }
+
+        try
+        {
+            if (_useWaveLogo) _profile.LogoPath = null;
+            else if (_pendingLogo is not null) _profile.LogoPath = LogoUpload.Save(_pendingLogo, _pendingExtension!, Db.DataDirectory);
+
+            Settings.SaveBusinessProfile(_profile);
+            Settings.SavePrintSettings(_print);
+        }
+        catch (IOException ex)
+        {
+            _error = $"Couldn't save: {ex.Message}";
+            return;
+        }
+
+        // Full reload so the header and every page pick up the new logo and name.
+        Navigation.NavigateTo("/settings?saved=1", forceLoad: true);
+    }
+}

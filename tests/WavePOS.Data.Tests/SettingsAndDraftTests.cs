@@ -72,6 +72,45 @@ public sealed class SettingsAndDraftTests : IDisposable
     }
 
     [Fact]
+    public void Saved_draft_and_sale_can_be_loaded_back_for_reprinting()
+    {
+        var users = new UserRepository(_db);
+        var mary = users.Create("mary", "Mary Banda", "4321", UserRole.Manager);
+        var products = new ProductRepository(_db).GetAll();
+        var cart = new Cart();
+        cart.Add(products[0], 3);
+        cart.Add(products[1]);
+
+        var draft = SalesDocument.DraftFromCart(cart, mary.DisplayName, "ABC Ltd", new DateTime(2026, 10, 27, 10, 0, 0));
+        var number = new DraftInvoiceRepository(_db).Save(draft, mary.Id);
+        var loadedDraft = new DraftInvoiceRepository(_db).Get(number.ToLowerInvariant())!;
+
+        Assert.Equal(number, loadedDraft.Number);
+        Assert.Equal("ABC Ltd", loadedDraft.CustomerName);
+        Assert.Equal("Mary Banda", loadedDraft.CashierName);
+        Assert.Equal(draft.Total, loadedDraft.Total);
+        Assert.Equal(draft.VatAmount, loadedDraft.VatAmount);
+        Assert.Equal(2, loadedDraft.Lines.Count);
+        Assert.Equal(draft.ValidUntil, loadedDraft.ValidUntil);
+
+        var sale = cart.Checkout(PaymentMethod.Cash, 1000m);
+        sale.CashierId = mary.Id;
+        var sales = new SaleRepository(_db);
+        var id = sales.Save(sale);
+        var receipt = sales.GetReceipt(id)!;
+
+        Assert.Equal(DocumentKind.Receipt, receipt.Kind);
+        Assert.Equal("Mary Banda", receipt.CashierName);
+        Assert.Equal(sale.Total, receipt.Total);
+        Assert.Equal(sale.Change, receipt.Change);
+        Assert.Equal(PaymentMethod.Cash, receipt.PaymentMethod);
+        Assert.Equal(4, receipt.Lines.Sum(l => l.Quantity));
+
+        Assert.Null(sales.GetReceipt(99999));
+        Assert.Null(new DraftInvoiceRepository(_db).Get("DRF-99999"));
+    }
+
+    [Fact]
     public void Draft_invoices_get_sequential_numbers()
     {
         var products = new ProductRepository(_db).GetAll();

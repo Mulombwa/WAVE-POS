@@ -9,7 +9,9 @@ Point-of-sale system. C# Windows desktop app first, then a .NET MAUI mobile app 
 | `src/WavePOS.Core` | Products, cart, VAT, checkout, money (Kwacha). Shared by all apps. |
 | `src/WavePOS.Data` | Local SQLite database (works offline). Products and sales. |
 | `src/WavePOS.Desktop` | Windows till app (WPF). |
+| `src/WavePOS.Web` | Web portal (ASP.NET Core Blazor): same till, login, settings, receipts and draft invoices in the browser. |
 | `tests/WavePOS.Core.Tests` | Unit tests for the core logic. |
+| `tests/WavePOS.Data.Tests` | Tests for the database layer (login, settings, drafts, receipts). |
 
 ## Run it
 
@@ -21,6 +23,20 @@ dotnet test
 ```
 
 The database is created at `%LOCALAPPDATA%\WavePOS\wavepos.db` with sample products on first run.
+
+## Web portal
+
+```bash
+dotnet run --project src/WavePOS.Web
+```
+
+Then open http://localhost:5254. It works on PCs, tablets and phones.
+
+- Same features as the desktop till: first-time manager setup, sign in, products, barcode entry, cart, Cash / Card / Mobile Money, change, draft invoices, receipt preview and printing, Settings with logo upload (managers only), and "Built by Wave".
+- Printing uses the browser's print dialog. Receipts and invoices have print layouts for 80mm rolls and A4. Choose "Save as PDF" in the dialog to get a PDF.
+- Data is stored in `src/WavePOS.Web/App_Data/wavepos.db` by default. Set `WavePOS:Database` in `appsettings.json` (or `WAVEPOS_DB`) to use a different file.
+- The web portal and the desktop app each have their **own** database for now. Sharing one set of data across tills and the web needs a central server database (a planned next step).
+- For use over the internet, host it behind HTTPS.
 
 ## Logging in
 
@@ -50,3 +66,8 @@ The database is created at `%LOCALAPPDATA%\WavePOS\wavepos.db` with sample produ
 
 - Scan a barcode (or type a code/SKU) and press **Enter** to add it.
 - **F12** completes the sale.
+
+## Licence
+
+Proprietary software. Copyright (c) 2026 Wave Cyber Security Limited. All rights reserved.
+No use, copying, modification or distribution without written permission from Wave. See [LICENSE](LICENSE).

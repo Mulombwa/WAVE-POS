@@ -3,6 +3,7 @@
     <Project Path="src/WavePOS.Core/WavePOS.Core.csproj" />
     <Project Path="src/WavePOS.Data/WavePOS.Data.csproj" />
     <Project Path="src/WavePOS.Desktop/WavePOS.Desktop.csproj" />
+    <Project Path="src/WavePOS.Web/WavePOS.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WavePOS.Core.Tests/WavePOS.Core.Tests.csproj" />

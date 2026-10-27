@@ -1,0 +1,387 @@
+@page "/"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Globalization
+@inject ProductRepository Products
+@inject SaleRepository Sales
+@inject DraftInvoiceRepository Drafts
+@inject SettingsRepository Settings
+@inject IJSRuntime JS
+
+<PageTitle>Till · WAVE POS</PageTitle>
+
+<div class="till">
+    <!-- Products -->
+    <section class="till-products">
+        <input @ref="_searchBox" class="search" type="search" placeholder="Scan barcode or search products…"
+               @bind="SearchText" @bind:event="oninput" @onkeydown="OnSearchKey" aria-label="Scan barcode or search products" />
+
+        <div class="product-grid">
+            @foreach (var p in _products)
+            {
+                <button type="button" class="product-tile" @onclick="() => Add(p)">
+                    <span class="category">@p.Category</span>
+                    <span class="name">@p.Name</span>
+                    <span class="tile-foot">
+                        <span class="price">@Money.Format(p.Price)</span>
+                        <span class="stock">@p.StockQuantity in stock</span>
+                    </span>
+                </button>
+            }
+            @if (_products.Count == 0)
+            {
+                <p class="muted empty">No products match “@SearchText”.</p>
+            }
+        </div>
+    </section>
+
+    <!-- Current sale -->
+    <section class="card till-cart">
+        <div class="cart-head">
+            <h2>Current sale</h2>
+            <button type="button" class="btn small" disabled="@_cart.IsEmpty" @onclick="ClearCart">Clear</button>
+        </div>
+
+        <div class="cart-lines">
+            @if (_cart.IsEmpty)
+            {
+                <p class="muted empty">No items yet</p>
+            }
+            @foreach (var line in _cart.Lines)
+            {
+                <div class="cart-line">
+                    <div class="line-name">
+                        <strong>@line.Product.Name</strong>
+                        <span class="muted">@Money.Format(line.Product.Price) each</span>
+                    </div>
+                    <div class="qty">
+                        <button type="button" class="btn icon" aria-label="Less" @onclick="() => ChangeQty(line, -1)">−</button>
+                        <span>@line.Quantity</span>
+                        <button type="button" class="btn icon" aria-label="More" @onclick="() => ChangeQty(line, +1)">+</button>
+                    </div>
+                    <strong class="line-total">@Money.Format(line.LineTotal)</strong>
+                    <button type="button" class="btn icon danger" aria-label="Remove" @onclick="() => Remove(line)">✕</button>
+                </div>
+            }
+        </div>
+
+        <div class="cart-foot">
+            <div class="row muted"><span>VAT included</span><span>@Money.Format(_cart.VatAmount)</span></div>
+            <div class="row total">
+                <span><strong>TOTAL</strong><small class="muted">@(_cart.ItemCount == 1 ? "1 item" : $"{_cart.ItemCount} items")</small></span>
+                <span class="amount">@Money.Format(_cart.Total)</span>
+            </div>
+
+            <div class="pay-methods" role="radiogroup" aria-label="Payment method">
+                @foreach (var (method, label) in PaymentOptions)
+                {
+                    <button type="button" role="radio" aria-checked="@(_method == method)"
+                            class="pay @(_method == method ? "selected" : "")" @onclick="() => SetMethod(method)">@label</button>
+                }
+            </div>
+
+            @if (_method == PaymentMethod.Cash)
+            {
+                <label class="cash-row">
+                    <span>Cash received</span>
+                    <input type="text" inputmode="decimal" @bind="TenderedText" @bind:event="oninput" />
+                </label>
+                <div class="quick-cash">
+                    <button type="button" class="btn" @onclick="ExactCash">Exact</button>
+                    @foreach (var amount in new[] { 50, 100, 200, 500 })
+                    {
+                        <button type="button" class="btn" @onclick="() => TenderedText = amount.ToString(CultureInfo.InvariantCulture)">K@(amount)</button>
+                    }
+                </div>
+                <div class="row change"><span>Change</span><strong>@ChangeText</strong></div>
+            }
+
+            <button type="button" class="btn success block xl" disabled="@_cart.IsEmpty" @onclick="CompleteSale">Complete sale</button>
+
+            <div class="print-actions">
+                <button type="button" class="btn outline" disabled="@_cart.IsEmpty" @onclick="OpenDraftDialog">Draft invoice</button>
+                <button type="button" class="btn outline" disabled="@(_lastReceiptId is null)" @onclick="PrintLastReceipt">Print last receipt</button>
+            </div>
+            <label class="check">
+                <input type="checkbox" checked="@_autoPrint" @onchange="OnAutoPrintChanged" />
+                Print receipt after each sale
+            </label>
+        </div>
+    </section>
+</div>
+
+<div class="status @(_statusIsError ? "error" : "")" role="status" aria-live="polite">
+    <span>@_status</span>
+    @if (_statusLink is not null)
+    {
+        <a href="@_statusLink" target="_blank" rel="noopener">@_statusLinkText</a>
+    }
+</div>
+
+@if (_showDraftDialog)
+{
+    <div class="modal-backdrop" @onclick="() => _showDraftDialog = false"></div>
+    <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="draft-title">
+        <h2 id="draft-title">Draft invoice</h2>
+        <p class="muted">Customer name (optional). The cart stays as it is.</p>
+        <input @ref="_draftInput" class="field-input" @bind="_draftCustomer" @bind:event="oninput" @onkeydown="OnDraftKey"
+               aria-label="Customer name" />
+        <div class="modal-actions">
+            <button type="button" class="btn" @onclick="() => _showDraftDialog = false">Cancel</button>
+            <button type="button" class="btn primary" @onclick="CreateDraft">Create draft</button>
+        </div>
+    </div>
+}
+
+@if (_previewUrl is not null)
+{
+    <div class="modal-backdrop" @onclick="ClosePreview"></div>
+    <div class="preview card" role="dialog" aria-modal="true" aria-label="@_previewTitle">
+        <div class="preview-bar">
+            <div>
+                <strong>@_previewTitle</strong>
+                <span class="muted small">To save as PDF, click Print and choose “Save as PDF”.</span>
+            </div>
+            <div class="preview-actions">
+                <button type="button" class="btn small @(_previewPaper == PaperSize.Receipt80mm ? "selected" : "")"
+                        @onclick="() => _previewPaper = PaperSize.Receipt80mm">80mm</button>
+                <button type="button" class="btn small @(_previewPaper == PaperSize.A4 ? "selected" : "")"
+                        @onclick="() => _previewPaper = PaperSize.A4">A4</button>
+                <a class="btn small" href="@PreviewPageUrl" target="_blank" rel="noopener">Open in new tab</a>
+                <button type="button" class="btn" @onclick="ClosePreview">Close</button>
+                <button type="button" class="btn primary" @onclick="PrintPreview">Print…</button>
+            </div>
+        </div>
+        <iframe id="wavepos-preview-frame" title="@_previewTitle" src="@($"{PreviewPageUrl}&embed=1")"></iframe>
+    </div>
+}
+
+@code {
+    private static readonly (PaymentMethod, string)[] PaymentOptions =
+        [(PaymentMethod.Cash, "Cash"), (PaymentMethod.Card, "Card"), (PaymentMethod.MobileMoney, "Mobile Money")];
+
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private readonly Cart _cart = new();
+    private List<Product> _products = [];
+    private User _cashier = new();
+    private ElementReference _searchBox;
+
+    private string _searchText = "";
+    private PaymentMethod _method = PaymentMethod.Cash;
+    private bool _autoPrint;
+    private long? _lastReceiptId;
+
+    private string _status = "";
+    private bool _statusIsError;
+    private string? _statusLink;
+    private string? _statusLinkText;
+
+    private bool _showDraftDialog;
+    private bool _focusDraftInput;
+    private ElementReference _draftInput;
+    private string _draftCustomer = "";
+
+    private string SearchText
+    {
+        get => _searchText;
+        set { _searchText = value; LoadProducts(); }
+    }
+
+    private string TenderedText { get; set; } = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _cashier = (await AuthState).User.ToUser();
+        _autoPrint = Settings.GetPrintSettings().AutoPrintReceipt;
+        LoadProducts();
+        SetStatus($"Welcome, {_cashier.DisplayName}. Scan a barcode or tap a product.");
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await _searchBox.FocusAsync();
+        if (_focusDraftInput && _showDraftDialog)
+        {
+            _focusDraftInput = false;
+            await _draftInput.FocusAsync();
+        }
+    }
+
+    private void LoadProducts() => _products = Products.Search(_searchText);
+
+    private void Add(Product product)
+    {
+        _cart.Add(product);
+        SetStatus($"Added {product.Name}.");
+    }
+
+    private void ChangeQty(CartLine line, int delta) => _cart.SetQuantity(line.Product.Id, line.Quantity + delta);
+    private void Remove(CartLine line) => _cart.Remove(line.Product.Id);
+
+    private void ClearCart()
+    {
+        _cart.Clear();
+        SetStatus("Sale cleared.");
+    }
+
+    /// <summary>Enter in the search box: barcode scanners type the code then press Enter.</summary>
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+        var text = _searchText.Trim();
+        if (text.Length == 0) return;
+
+        var product = Products.FindByCode(text) ?? (_products.Count == 1 ? _products[0] : null);
+        if (product is null)
+        {
+            SetStatus(_products.Count == 0 ? $"No product matches \"{text}\"." : "Several matches — tap the product.", error: _products.Count == 0);
+            return;
+        }
+        Add(product);
+        SearchText = "";
+        await _searchBox.FocusAsync();
+    }
+
+    private void SetMethod(PaymentMethod method) => _method = method;
+
+    private void ExactCash() => TenderedText = _cart.Total.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private bool TryParseTendered(out decimal value) =>
+        decimal.TryParse(TenderedText.Replace("K", "").Replace(",", "").Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out value);
+
+    private string ChangeText
+    {
+        get
+        {
+            if (!TryParseTendered(out var tendered)) return "—";
+            var change = tendered - _cart.Total;
+            return change >= 0 ? Money.Format(change) : $"Short {Money.Format(-change)}";
+        }
+    }
+
+    private async Task CompleteSale()
+    {
+        decimal tendered = 0;
+        if (_method == PaymentMethod.Cash && !TryParseTendered(out tendered))
+        {
+            SetStatus("Enter the cash amount received.", error: true);
+            return;
+        }
+
+        try
+        {
+            var sale = _cart.Checkout(_method, tendered);
+            sale.CashierId = _cashier.Id;
+            Sales.Save(sale);
+
+            _cart.Clear();
+            TenderedText = "";
+            _method = PaymentMethod.Cash;
+            _lastReceiptId = sale.Id;
+            LoadProducts(); // stock changed
+
+            var change = sale.PaymentMethod == PaymentMethod.Cash ? $" Change: {Money.Format(sale.Change)}." : "";
+            SetStatus($"Sale #{sale.Id} complete — {Money.Format(sale.Total)} by {sale.PaymentMethod.DisplayName()}.{change}",
+                link: ReceiptUrl(sale.Id), linkText: "View receipt");
+
+            if (_autoPrint) await PrintAsync(ReceiptUrl(sale.Id));
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetStatus(ex.Message, error: true);
+        }
+    }
+
+    // ---------- Preview (like the desktop app's preview window) ----------
+
+    private string? _previewUrl;
+    private string _previewTitle = "";
+    private PaperSize _previewPaper;
+
+    private string PreviewPageUrl => $"{_previewUrl}?paper={Branding.PaperParam(_previewPaper)}";
+
+    private void ShowPreview(string url, string title, PaperSize paper)
+    {
+        _previewUrl = url;
+        _previewTitle = title;
+        _previewPaper = paper;
+    }
+
+    private void ClosePreview() => _previewUrl = null;
+
+    private async Task PrintPreview()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("wavePos.printFrame", "wavepos-preview-frame");
+        }
+        catch (JSException)
+        {
+            SetStatus("Couldn't open the print dialog — use “Open in new tab” to print.", error: true);
+        }
+    }
+
+    private void PrintLastReceipt()
+    {
+        if (_lastReceiptId is { } id)
+            ShowPreview(ReceiptUrl(id), $"RECEIPT  {id:D6}", Settings.GetPrintSettings().ReceiptPaper);
+    }
+
+    private void OpenDraftDialog()
+    {
+        _draftCustomer = "";
+        _showDraftDialog = true;
+        _focusDraftInput = true;
+    }
+
+    private void OnDraftKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") CreateDraft();
+        else if (e.Key == "Escape") _showDraftDialog = false;
+    }
+
+    /// <summary>Saves the cart as a numbered draft invoice (quotation) and opens its preview. The cart is kept.</summary>
+    private void CreateDraft()
+    {
+        _showDraftDialog = false;
+        if (_cart.IsEmpty) return;
+
+        var draft = SalesDocument.DraftFromCart(_cart, _cashier.DisplayName, _draftCustomer, DateTime.Now);
+        Drafts.Save(draft, _cashier.Id);
+        var url = $"/documents/draft/{draft.Number}";
+        SetStatus($"Draft invoice {draft.Number} created for {Money.Format(draft.Total)}.", link: url, linkText: "Open draft invoice");
+        ShowPreview(url, $"DRAFT INVOICE  {draft.Number}", Settings.GetPrintSettings().InvoicePaper);
+    }
+
+    private void OnAutoPrintChanged(ChangeEventArgs e)
+    {
+        _autoPrint = e.Value is true;
+        var print = Settings.GetPrintSettings();
+        print.AutoPrintReceipt = _autoPrint;
+        Settings.SavePrintSettings(print);
+    }
+
+    private static string ReceiptUrl(long saleId) => $"/documents/receipt/{saleId}";
+
+    /// <summary>Prints a document page through a hidden frame, so there's no pop-up to block.</summary>
+    private async Task PrintAsync(string url)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("wavePos.printUrl", url);
+        }
+        catch (JSException)
+        {
+            SetStatus($"{_status} Couldn't open the print dialog — use the link to print.", error: true, link: _statusLink, linkText: _statusLinkText);
+        }
+    }
+
+    private void SetStatus(string message, bool error = false, string? link = null, string? linkText = null)
+    {
+        _status = message;
+        _statusIsError = error;
+        _statusLink = link;
+        _statusLinkText = linkText;
+    }
+}

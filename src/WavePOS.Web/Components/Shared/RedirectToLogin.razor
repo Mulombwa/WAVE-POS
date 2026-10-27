@@ -1,0 +1,17 @@
+@inject NavigationManager Navigation
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState).User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            // Signed in but not allowed (e.g. a cashier opening Settings): back to the till.
+            Navigation.NavigateTo("/", forceLoad: true);
+            return;
+        }
+        var returnUrl = Uri.EscapeDataString("/" + Navigation.ToBaseRelativePath(Navigation.Uri));
+        Navigation.NavigateTo($"/login?returnUrl={returnUrl}", forceLoad: true);
+    }
+}

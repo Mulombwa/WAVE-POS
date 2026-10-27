@@ -78,6 +78,19 @@ public sealed class UserRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void User_can_be_loaded_by_id()
+    {
+        var created = _users.Create("mary", "Mary Banda", "4321", UserRole.Manager);
+
+        var loaded = _users.GetById(created.Id)!;
+
+        Assert.Equal("mary", loaded.Username);
+        Assert.Equal(UserRole.Manager, loaded.Role);
+        Assert.True(loaded.IsActive);
+        Assert.Null(_users.GetById(created.Id + 100));
+    }
+
+    [Fact]
     public void Short_password_is_rejected()
     {
         Assert.Throws<ArgumentException>(() => _users.Create("john", "John", "12", UserRole.Cashier));

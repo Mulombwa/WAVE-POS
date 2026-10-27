@@ -64,6 +64,16 @@ public class UserRepository(PosDatabase db)
         }
     }
 
+    public User? GetById(long id)
+    {
+        using var conn = db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"{SelectColumns} WHERE id = $id;";
+        cmd.Parameters.AddWithValue("$id", id);
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? Read(r) : null;
+    }
+
     public List<User> GetAll()
     {
         using var conn = db.Open();

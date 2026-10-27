@@ -1,0 +1,135 @@
+@* Receipt / invoice layout. Mirrors the desktop app's printed documents (80mm roll or A4). *@
+@{
+    var number = Document.Kind == DocumentKind.Receipt ? "Receipt no." : "Invoice no.";
+}
+
+@if (Paper == PaperSize.Receipt80mm)
+{
+    <article class="doc doc-80mm">
+        <header class="center">
+            <img class="doc-logo" src="@Branding.LogoUrl(Business)" alt="@Business.Name logo" />
+            <div class="biz-name">@Business.Name</div>
+            @foreach (var line in Details) { <div class="muted">@line</div> }
+        </header>
+        <hr />
+        <h1 class="center doc-title">@Document.Title</h1>
+        <dl class="pairs">
+            <dt>@number</dt><dd>@Document.Number</dd>
+            <dt>Date</dt><dd>@Document.Date.ToString("dd MMM yyyy HH:mm")</dd>
+            <dt>Served by</dt><dd>@Document.CashierName</dd>
+            @if (Document.CustomerName is { } customer) { <dt>Customer</dt><dd>@customer</dd> }
+            @if (Document.ValidUntil is { } valid) { <dt>Valid until</dt><dd>@valid.ToString("dd MMM yyyy")</dd> }
+        </dl>
+        <hr />
+        @foreach (var line in Document.Lines)
+        {
+            <div class="item">
+                <div class="pair"><strong>@line.Description</strong><span>@Money.Format(line.LineTotal)</span></div>
+                <div class="muted small">@line.Quantity × @Money.Format(line.UnitPrice)@(line.VatRate > 0 ? "" : "  (VAT exempt)")</div>
+            </div>
+        }
+        <hr />
+        <div class="pair big"><strong>TOTAL</strong><strong>@Money.Format(Document.Total)</strong></div>
+        <div class="pair muted"><span>VAT included</span><span>@Money.Format(Document.VatAmount)</span></div>
+        @if (Document.PaymentMethod is { } method)
+        {
+            <div class="pair"><span>Paid (@method.DisplayName())</span><span>@Money.Format(Document.AmountTendered)</span></div>
+            @if (method == PaymentMethod.Cash)
+            {
+                <div class="pair"><span>Change</span><strong>@Money.Format(Document.Change)</strong></div>
+            }
+        }
+        @if (Document.Kind == DocumentKind.DraftInvoice)
+        {
+            <p class="center muted small note">Draft invoice — not a receipt. Prices valid until the date above.</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(Business.ReceiptFooter))
+        {
+            <p class="center footer-msg">@Business.ReceiptFooter</p>
+        }
+    </article>
+}
+else
+{
+    <article class="doc doc-a4">
+        <header class="a4-head">
+            <div>
+                <img class="doc-logo" src="@Branding.LogoUrl(Business)" alt="@Business.Name logo" />
+                <div class="biz-name">@Business.Name</div>
+                @foreach (var line in Details) { <div class="muted">@line</div> }
+            </div>
+            <div class="right">
+                <h1 class="doc-title">@Document.Title</h1>
+                <dl class="pairs right-labels">
+                    <dt>@number</dt><dd><strong>@Document.Number</strong></dd>
+                    <dt>Date</dt><dd>@Document.Date.ToString("dd MMM yyyy")</dd>
+                    @if (Document.ValidUntil is { } valid) { <dt>Valid until</dt><dd>@valid.ToString("dd MMM yyyy")</dd> }
+                    <dt>Prepared by</dt><dd>@Document.CashierName</dd>
+                </dl>
+            </div>
+        </header>
+
+        <section class="bill-to">
+            <div class="label">@(Document.Kind == DocumentKind.Receipt ? "CUSTOMER" : "BILL TO")</div>
+            <strong>@(Document.CustomerName ?? "—")</strong>
+        </section>
+
+        <table class="items">
+            <thead>
+                <tr><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">VAT</th><th class="num">Amount</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var line in Document.Lines)
+                {
+                    <tr>
+                        <td>@line.Description</td>
+                        <td class="num">@line.Quantity</td>
+                        <td class="num">@Money.Format(line.UnitPrice)</td>
+                        <td class="num">@(line.VatRate > 0 ? $"{line.VatRate * 100:0.#}%" : "Exempt")</td>
+                        <td class="num">@Money.Format(line.LineTotal)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <table class="totals">
+            <tr><td>Subtotal (excl. VAT)</td><td>@Money.Format(Document.NetAmount)</td></tr>
+            <tr><td>VAT</td><td>@Money.Format(Document.VatAmount)</td></tr>
+            <tr class="grand"><td>Total</td><td>@Money.Format(Document.Total)</td></tr>
+            @if (Document.PaymentMethod is { } method)
+            {
+                <tr><td>Paid (@method.DisplayName())</td><td>@Money.Format(Document.AmountTendered)</td></tr>
+                @if (method == PaymentMethod.Cash)
+                {
+                    <tr><td>Change</td><td>@Money.Format(Document.Change)</td></tr>
+                }
+            }
+        </table>
+
+        @if (Document.Kind == DocumentKind.DraftInvoice)
+        {
+            <p class="muted note">This is a draft invoice (quotation), not a tax invoice or receipt. Prices are valid until @Document.ValidUntil?.ToString("dd MMM yyyy").</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(Business.ReceiptFooter))
+        {
+            <p class="center footer-msg">@Business.ReceiptFooter</p>
+        }
+    </article>
+}
+
+@code {
+    [Parameter, EditorRequired] public SalesDocument Document { get; set; } = default!;
+    [Parameter, EditorRequired] public BusinessProfile Business { get; set; } = default!;
+    [Parameter] public PaperSize Paper { get; set; }
+
+    private IEnumerable<string> Details
+    {
+        get
+        {
+            foreach (var line in Business.Address.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) yield return line;
+            var contact = string.Join("  ·  ", new[] { Business.Phone, Business.Email }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (contact.Length > 0) yield return contact;
+            if (!string.IsNullOrWhiteSpace(Business.Tpin)) yield return $"TPIN: {Business.Tpin}";
+        }
+    }
+}
