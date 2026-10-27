@@ -1,4 +1,5 @@
 ﻿@inherits LayoutComponentBase
+@using WavePOS.Core.Security
 @inject SettingsRepository Settings
 
 <div class="app">
@@ -10,11 +11,15 @@
         </a>
         <AuthorizeView>
             <Authorized>
-                <nav class="topnav">
+                <nav class="topnav" aria-label="Main">
                     <NavLink href="/" Match="NavLinkMatch.All">Till</NavLink>
-                    <AuthorizeView Policy="@UserClaims.ManagerPolicy" Context="manager">
-                        <NavLink href="/settings">Settings</NavLink>
-                    </AuthorizeView>
+                    @foreach (var (href, label, permission) in Sections)
+                    {
+                        @if (context.User.ToUser().Role.Can(permission))
+                        {
+                            <NavLink href="@href">@label</NavLink>
+                        }
+                    }
                 </nav>
                 <span class="who">@context.User.Identity?.Name · @context.User.ToUser().Role</span>
                 <form method="post" action="/logout" class="logout">
@@ -40,6 +45,16 @@
 </div>
 
 @code {
+    private static readonly (string Href, string Label, Permission Permission)[] Sections =
+    [
+        ("/inventory", "Inventory", Permission.ViewInventory),
+        ("/customers", "Customers", Permission.ViewCustomers),
+        ("/returns", "Returns", Permission.ProcessReturns),
+        ("/staff", "Staff", Permission.ManageStaff),
+        ("/audit", "Audit trail", Permission.ViewAuditLog),
+        ("/settings", "Settings", Permission.ManageSettings),
+    ];
+
     private BusinessProfile _profile = new();
 
     protected override void OnParametersSet() => _profile = Settings.GetBusinessProfile();

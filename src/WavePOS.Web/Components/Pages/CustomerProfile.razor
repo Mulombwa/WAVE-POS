@@ -1,0 +1,159 @@
+@page "/customers/{Id:long}"
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ViewCustomers))]
+@rendermode InteractiveServer
+@using WavePOS.Core.Security
+@inject CustomerRepository CustomerData
+@inject SaleRepository Sales
+@inject IJSRuntime JS
+
+<PageTitle>@(_customer?.Name ?? "Customer") · WAVE POS</PageTitle>
+
+<div class="page">
+    <p><a href="/customers">← Customers</a></p>
+
+    @if (_customer is null)
+    {
+        <p class="muted">Customer not found.</p>
+    }
+    else
+    {
+        <div class="page-head">
+            <div>
+                <h1>@_customer.Name</h1>
+                <span class="muted mono">@_customer.Code</span>
+                @if (_customer.IsAnonymised) { <span class="badge">Anonymised</span> }
+            </div>
+        </div>
+
+        <div class="stat-grid">
+            <div class="stat"><span>Visits</span><strong>@_customer.Visits</strong></div>
+            <div class="stat"><span>Total spent</span><strong>@Money.Format(_customer.TotalSpent)</strong></div>
+            <div class="stat"><span>Average sale</span><strong>@Money.Format(_customer.Visits == 0 ? 0 : _customer.TotalSpent / _customer.Visits)</strong></div>
+            <div class="stat"><span>Last visit</span><strong>@(_customer.LastVisit?.ToString("dd MMM yyyy") ?? "—")</strong></div>
+            <div class="stat"><span>Customer since</span><strong>@_customer.CreatedAt.ToString("dd MMM yyyy")</strong></div>
+        </div>
+
+        @if (_message is not null) { <div class="alert @(_messageIsError ? "error" : "success")" role="status">@_message</div> }
+
+        <div class="cols">
+            <section class="card">
+                <h2>Details</h2>
+                <CustomerForm Customer="_edit" Disabled="@(!_canManage || _customer.IsAnonymised)" />
+                @if (_canManage && !_customer.IsAnonymised)
+                {
+                    <div class="actions-row"><button type="button" class="btn primary" @onclick="Save">Save</button></div>
+                }
+            </section>
+
+            <section class="card">
+                <h2>Purchases</h2>
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>Receipt</th><th>Date</th><th class="num">Items</th><th class="num">Total</th><th>Paid by</th></tr></thead>
+                        <tbody>
+                            @foreach (var p in _purchases)
+                            {
+                                <tr>
+                                    <td><a href="/documents/receipt/@p.Id" target="_blank" rel="noopener">@p.Id.ToString("D6")</a></td>
+                                    <td>@p.Date.ToString("dd MMM yyyy HH:mm")</td>
+                                    <td class="num">@p.Items</td>
+                                    <td class="num">@Money.Format(p.Total)</td>
+                                    <td>@p.Method.DisplayName()</td>
+                                </tr>
+                            }
+                            @if (_purchases.Count == 0) { <tr><td colspan="5" class="muted empty">No purchases yet.</td></tr> }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (_canHandleRequests && !_customer.IsAnonymised)
+                {
+                    <h2 class="sub">Data protection requests</h2>
+                    <p class="muted">
+                        <strong>Export</strong> gives the customer a copy of everything held about them.
+                        <strong>Anonymise</strong> permanently removes their personal details; their past sales are kept for tax records.
+                    </p>
+                    <div class="actions-row left">
+                        <button type="button" class="btn outline" @onclick="Export">Export their data</button>
+                        @if (!_confirmAnonymise)
+                        {
+                            <button type="button" class="btn danger-outline" @onclick="() => _confirmAnonymise = true">Anonymise…</button>
+                        }
+                        else
+                        {
+                            <span>This can't be undone.</span>
+                            <button type="button" class="btn danger-solid" @onclick="Anonymise">Yes, anonymise</button>
+                            <button type="button" class="btn" @onclick="() => _confirmAnonymise = false">Cancel</button>
+                        }
+                    </div>
+                }
+            </section>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public long Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private Customer? _customer;
+    private Customer _edit = new();
+    private List<(long Id, DateTime Date, decimal Total, PaymentMethod Method, int Items)> _purchases = [];
+    private bool _canManage, _canHandleRequests, _confirmAnonymise;
+    private string? _message;
+    private bool _messageIsError;
+    private WavePOS.Core.Audit.Actor _actor = WavePOS.Core.Audit.Actor.System;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var user = (await AuthState).User;
+        var role = user.ToUser().Role;
+        _actor = user.ToActor();
+        _canManage = role.Can(Permission.ManageCustomers);
+        _canHandleRequests = role.Can(Permission.HandleDataRequests);
+        Load();
+        if (_customer is not null) CustomerData.LogViewed(Id, _actor); // access to personal data is recorded
+    }
+
+    private void Load()
+    {
+        _customer = CustomerData.Get(Id);
+        if (_customer is null) return;
+        _edit = new Customer
+        {
+            Id = _customer.Id, Name = _customer.Name, Phone = _customer.Phone, Email = _customer.Email,
+            Address = _customer.Address, Notes = _customer.Notes,
+            MarketingConsent = _customer.MarketingConsent, ConsentDate = _customer.ConsentDate,
+        };
+        _purchases = Sales.ForCustomer(Id);
+    }
+
+    private void Save()
+    {
+        try
+        {
+            CustomerData.Update(_edit, _actor);
+            Load();
+            (_message, _messageIsError) = ("Saved.", false);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            (_message, _messageIsError) = (ex.Message, true);
+        }
+    }
+
+    private async Task Export()
+    {
+        var json = CustomerData.ExportData(Id, _actor);
+        await JS.InvokeVoidAsync("wavePos.download", $"{_customer!.Code}-personal-data.json", "application/json", json);
+        (_message, _messageIsError) = ("Data exported. Give the file only to the customer, securely.", false);
+    }
+
+    private void Anonymise()
+    {
+        CustomerData.Anonymise(Id, _actor);
+        _confirmAnonymise = false;
+        Load();
+        (_message, _messageIsError) = ("Customer anonymised. Their personal details have been removed.", false);
+    }
+}

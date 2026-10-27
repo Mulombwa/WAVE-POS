@@ -26,3 +26,15 @@ window.wavePos = {
         frame.contentWindow.print();
     }
 };
+
+// Saves text (e.g. a JSON export or CSV) as a file download.
+window.wavePos.download = function (fileName, contentType, text) {
+    const blob = new Blob([text], { type: contentType });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+};

@@ -38,6 +38,30 @@ Then open http://localhost:5254. It works on PCs, tablets and phones.
 - The web portal and the desktop app each have their **own** database for now. Sharing one set of data across tills and the web needs a central server database (a planned next step).
 - For use over the internet, host it behind HTTPS.
 
+## Retail back office (web portal)
+
+| Section | Who | What |
+| --- | --- | --- |
+| **Inventory** | Everyone can view; supervisors adjust; managers edit | Products with variants (e.g. Size × Colour, each with its own SKU and stock), cost and margin, reorder levels, low/out-of-stock alerts, stock value. Receive stock (weighted-average cost), adjust (damaged, expired, theft) and stock counts. Every change is in the stock ledger. |
+| **Customers** | Everyone can look up; supervisors edit; managers handle data requests | Customer profiles, purchase history, visits and spend. Marketing consent is recorded with a date. Attach a customer to a sale at the till. |
+| **Returns** | Supervisors and managers | Refund all or part of a sale by receipt number, choose whether items go back in stock, print a refund slip. Can't refund more than was sold. Exchanges = refund + new sale. |
+| **Staff** | Managers | Unlimited users. Roles: Cashier, Supervisor, Manager. Employee details, disable accounts, reset PINs. At least one manager must stay active. |
+| **Audit trail** | Managers | Sign-ins (incl. failed and lockouts), sales, refunds, stock and price changes, customer data access/exports, staff and settings changes. Append-only and hash-chained, with an integrity check and CSV export. |
+
+### Data protection (Zambia Data Protection Act 2021)
+
+- Privacy notice on customer forms; marketing only with recorded consent (and consent can be withdrawn).
+- Every view, change, export and anonymisation of a customer's data is in the audit trail.
+- **Export** gives a customer a copy of their data (JSON). **Anonymise** removes their personal details but keeps the sales for tax records.
+
+## Roadmap
+
+1. ✅ Retail core: staff & roles, audit trail, inventory & variants, customers, returns.
+2. Central server sync: desktop tills share the web portal's data and work offline.
+3. Accounting: chart of accounts, double-entry books from sales/refunds/stock, accountant & bookkeeper views, bank statement import and reconciliation (live bank feeds need a bank/aggregator partner).
+4. Reports & analytics: sales by day/product/staff/customer, margins, seasonal trends, stock turnover.
+5. Hardware: ESC/POS receipt printers and cash drawers, barcode scanners, card terminals and mobile money (provider to be chosen).
+
 ## Logging in
 
 - On first start there are no accounts, so the app asks you to create the **manager** account.

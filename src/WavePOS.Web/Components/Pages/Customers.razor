@@ -1,0 +1,81 @@
+@page "/customers"
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ViewCustomers))]
+@rendermode InteractiveServer
+@using WavePOS.Core.Security
+@inject CustomerRepository CustomerData
+@inject NavigationManager Navigation
+
+<PageTitle>Customers · WAVE POS</PageTitle>
+
+<div class="page">
+    <div class="page-head">
+        <h1>Customers</h1>
+        @if (_canManage) { <button type="button" class="btn primary" @onclick="() => _adding = !_adding">@(_adding ? "Close" : "Add customer")</button> }
+    </div>
+
+    @if (_adding)
+    {
+        <section class="card">
+            <h2>New customer</h2>
+            @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+            <CustomerForm Customer="_new" />
+            <div class="actions-row"><button type="button" class="btn primary" @onclick="Add">Save customer</button></div>
+        </section>
+    }
+
+    <div class="filters">
+        <input type="search" placeholder="Search name, phone, email or code…" @bind="Search" @bind:event="oninput" aria-label="Search customers" />
+    </div>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>Code</th><th>Name</th><th>Phone</th><th class="num">Visits</th><th class="num">Total spent</th><th>Last visit</th><th>Marketing</th></tr></thead>
+            <tbody>
+                @foreach (var c in _customers)
+                {
+                    <tr>
+                        <td class="mono">@c.Code</td>
+                        <td><a href="/customers/@c.Id">@c.Name</a></td>
+                        <td>@c.Phone</td>
+                        <td class="num">@c.Visits</td>
+                        <td class="num">@Money.Format(c.TotalSpent)</td>
+                        <td>@(c.LastVisit?.ToString("dd MMM yyyy") ?? "—")</td>
+                        <td>@(c.MarketingConsent ? "Opted in" : "—")</td>
+                    </tr>
+                }
+                @if (_customers.Count == 0) { <tr><td colspan="7" class="muted empty">No customers found.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private List<Customer> _customers = [];
+    private string _search = "";
+    private bool _canManage, _adding;
+    private Customer _new = new();
+    private string? _error;
+
+    private string Search { get => _search; set { _search = value; _customers = CustomerData.Search(value, 200); } }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = (await AuthState).User.ToUser().Role.Can(Permission.ManageCustomers);
+        _customers = CustomerData.Search(null, 200);
+    }
+
+    private async Task Add()
+    {
+        try
+        {
+            var created = CustomerData.Create(_new, (await AuthState).User.ToActor());
+            Navigation.NavigateTo($"/customers/{created.Id}");
+        }
+        catch (ArgumentException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

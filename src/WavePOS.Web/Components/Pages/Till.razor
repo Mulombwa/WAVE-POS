@@ -6,6 +6,7 @@
 @inject SaleRepository Sales
 @inject DraftInvoiceRepository Drafts
 @inject SettingsRepository Settings
+@inject CustomerRepository CustomerData
 @inject IJSRuntime JS
 
 <PageTitle>Till · WAVE POS</PageTitle>
@@ -19,12 +20,12 @@
         <div class="product-grid">
             @foreach (var p in _products)
             {
-                <button type="button" class="product-tile" @onclick="() => Add(p)">
+                <button type="button" class="product-tile @(p.StockQuantity <= 0 ? "out" : p.IsLowStock ? "low" : "")" @onclick="() => Add(p)">
                     <span class="category">@p.Category</span>
                     <span class="name">@p.Name</span>
                     <span class="tile-foot">
                         <span class="price">@Money.Format(p.Price)</span>
-                        <span class="stock">@p.StockQuantity in stock</span>
+                        <span class="stock">@(p.StockQuantity <= 0 ? "Out of stock" : $"{p.StockQuantity} in stock")</span>
                     </span>
                 </button>
             }
@@ -40,6 +41,19 @@
         <div class="cart-head">
             <h2>Current sale</h2>
             <button type="button" class="btn small" disabled="@_cart.IsEmpty" @onclick="ClearCart">Clear</button>
+        </div>
+        <div class="cart-customer">
+            @if (_customer is null)
+            {
+                <button type="button" class="btn small outline" @onclick="OpenCustomerDialog">+ Add customer</button>
+            }
+            else
+            {
+                <span class="chip">
+                    👤 @_customer.Name <span class="muted">@_customer.Phone</span>
+                    <button type="button" class="chip-x" aria-label="Remove customer" @onclick="() => _customer = null">✕</button>
+                </span>
+            }
         </div>
 
         <div class="cart-lines">
@@ -133,6 +147,38 @@
     </div>
 }
 
+@if (_showCustomerDialog)
+{
+    <div class="modal-backdrop" @onclick="() => _showCustomerDialog = false"></div>
+    <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="cust-title">
+        <h2 id="cust-title">Customer</h2>
+        @if (!_quickAdd)
+        {
+            <input @ref="_customerSearchBox" class="field-input" placeholder="Search name or phone…" @bind="CustomerSearch" @bind:event="oninput" aria-label="Search customers" />
+            <ul class="pick-list">
+                @foreach (var c in _customerResults)
+                {
+                    <li><button type="button" @onclick="() => PickCustomer(c)"><strong>@c.Name</strong> <span class="muted">@c.Phone · @c.Code</span></button></li>
+                }
+                @if (_customerSearch.Trim().Length >= 2 && _customerResults.Count == 0) { <li class="muted">No match.</li> }
+            </ul>
+            <div class="modal-actions">
+                <button type="button" class="btn" @onclick="() => _showCustomerDialog = false">Cancel</button>
+                <button type="button" class="btn outline" @onclick="() => { _quickAdd = true; _newCustomer.Name = _customerSearch; }">New customer</button>
+            </div>
+        }
+        else
+        {
+            @if (_customerError is not null) { <div class="alert error" role="alert">@_customerError</div> }
+            <CustomerForm Customer="_newCustomer" />
+            <div class="modal-actions">
+                <button type="button" class="btn" @onclick="() => _quickAdd = false">Back</button>
+                <button type="button" class="btn primary" @onclick="CreateCustomer">Save &amp; add</button>
+            </div>
+        }
+    </div>
+}
+
 @if (_previewUrl is not null)
 {
     <div class="modal-backdrop" @onclick="ClosePreview"></div>
@@ -201,6 +247,11 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender) await _searchBox.FocusAsync();
+        if (_focusCustomerSearch && _showCustomerDialog)
+        {
+            _focusCustomerSearch = false;
+            await _customerSearchBox.FocusAsync();
+        }
         if (_focusDraftInput && _showDraftDialog)
         {
             _focusDraftInput = false;
@@ -273,7 +324,9 @@
         {
             var sale = _cart.Checkout(_method, tendered);
             sale.CashierId = _cashier.Id;
-            Sales.Save(sale);
+            sale.CustomerId = _customer?.Id;
+            Sales.Save(sale, new WavePOS.Core.Audit.Actor(_cashier.Id, _cashier.DisplayName));
+            _customer = null;
 
             _cart.Clear();
             TenderedText = "";
@@ -330,7 +383,7 @@
 
     private void OpenDraftDialog()
     {
-        _draftCustomer = "";
+        _draftCustomer = _customer?.Name ?? "";
         _showDraftDialog = true;
         _focusDraftInput = true;
     }
@@ -374,6 +427,52 @@
         catch (JSException)
         {
             SetStatus($"{_status} Couldn't open the print dialog — use the link to print.", error: true, link: _statusLink, linkText: _statusLinkText);
+        }
+    }
+
+    // ---------- Customer ----------
+
+    private Customer? _customer;
+    private bool _showCustomerDialog, _focusCustomerSearch, _quickAdd;
+    private ElementReference _customerSearchBox;
+    private string _customerSearch = "";
+    private List<Customer> _customerResults = [];
+    private Customer _newCustomer = new();
+    private string? _customerError;
+
+    private string CustomerSearch
+    {
+        get => _customerSearch;
+        set { _customerSearch = value; _customerResults = value.Trim().Length < 2 ? [] : CustomerData.Search(value, 8); }
+    }
+
+    private void OpenCustomerDialog()
+    {
+        _customerSearch = "";
+        _customerResults = [];
+        _quickAdd = false;
+        _customerError = null;
+        _newCustomer = new Customer();
+        _showCustomerDialog = true;
+        _focusCustomerSearch = true;
+    }
+
+    private void PickCustomer(Customer c)
+    {
+        _customer = c;
+        _showCustomerDialog = false;
+        SetStatus($"Customer: {c.Name}.");
+    }
+
+    private void CreateCustomer()
+    {
+        try
+        {
+            PickCustomer(CustomerData.Create(_newCustomer, new WavePOS.Core.Audit.Actor(_cashier.Id, _cashier.DisplayName)));
+        }
+        catch (ArgumentException ex)
+        {
+            _customerError = ex.Message;
         }
     }
 

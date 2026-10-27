@@ -1,6 +1,7 @@
 @* Receipt / invoice layout. Mirrors the desktop app's printed documents (80mm roll or A4). *@
 @{
-    var number = Document.Kind == DocumentKind.Receipt ? "Receipt no." : "Invoice no.";
+    var number = Document.NumberLabel;
+    var paidLabel = Document.Kind == DocumentKind.Refund ? "Refunded" : "Paid";
 }
 
 @if (Paper == PaperSize.Receipt80mm)
@@ -19,6 +20,8 @@
             <dt>Served by</dt><dd>@Document.CashierName</dd>
             @if (Document.CustomerName is { } customer) { <dt>Customer</dt><dd>@customer</dd> }
             @if (Document.ValidUntil is { } valid) { <dt>Valid until</dt><dd>@valid.ToString("dd MMM yyyy")</dd> }
+            @if (Document.OriginalReceiptNumber is { } orig) { <dt>Original receipt</dt><dd>@orig</dd> }
+            @if (Document.ReturnReason is { } reason) { <dt>Reason</dt><dd>@reason</dd> }
         </dl>
         <hr />
         @foreach (var line in Document.Lines)
@@ -29,12 +32,12 @@
             </div>
         }
         <hr />
-        <div class="pair big"><strong>TOTAL</strong><strong>@Money.Format(Document.Total)</strong></div>
+        <div class="pair big"><strong>@(Document.Kind == DocumentKind.Refund ? "REFUND TOTAL" : "TOTAL")</strong><strong>@Money.Format(Document.Total)</strong></div>
         <div class="pair muted"><span>VAT included</span><span>@Money.Format(Document.VatAmount)</span></div>
         @if (Document.PaymentMethod is { } method)
         {
-            <div class="pair"><span>Paid (@method.DisplayName())</span><span>@Money.Format(Document.AmountTendered)</span></div>
-            @if (method == PaymentMethod.Cash)
+            <div class="pair"><span>@paidLabel (@method.DisplayName())</span><span>@Money.Format(Document.AmountTendered)</span></div>
+            @if (method == PaymentMethod.Cash && Document.Kind == DocumentKind.Receipt)
             {
                 <div class="pair"><span>Change</span><strong>@Money.Format(Document.Change)</strong></div>
             }
@@ -64,13 +67,14 @@ else
                     <dt>@number</dt><dd><strong>@Document.Number</strong></dd>
                     <dt>Date</dt><dd>@Document.Date.ToString("dd MMM yyyy")</dd>
                     @if (Document.ValidUntil is { } valid) { <dt>Valid until</dt><dd>@valid.ToString("dd MMM yyyy")</dd> }
+                    @if (Document.OriginalReceiptNumber is { } orig) { <dt>Original receipt</dt><dd>@orig</dd> }
                     <dt>Prepared by</dt><dd>@Document.CashierName</dd>
                 </dl>
             </div>
         </header>
 
         <section class="bill-to">
-            <div class="label">@(Document.Kind == DocumentKind.Receipt ? "CUSTOMER" : "BILL TO")</div>
+            <div class="label">@(Document.Kind == DocumentKind.DraftInvoice ? "BILL TO" : "CUSTOMER")</div>
             <strong>@(Document.CustomerName ?? "—")</strong>
         </section>
 
@@ -98,14 +102,18 @@ else
             <tr class="grand"><td>Total</td><td>@Money.Format(Document.Total)</td></tr>
             @if (Document.PaymentMethod is { } method)
             {
-                <tr><td>Paid (@method.DisplayName())</td><td>@Money.Format(Document.AmountTendered)</td></tr>
-                @if (method == PaymentMethod.Cash)
+                <tr><td>@paidLabel (@method.DisplayName())</td><td>@Money.Format(Document.AmountTendered)</td></tr>
+                @if (method == PaymentMethod.Cash && Document.Kind == DocumentKind.Receipt)
                 {
                     <tr><td>Change</td><td>@Money.Format(Document.Change)</td></tr>
                 }
             }
         </table>
 
+        @if (Document.Kind == DocumentKind.Refund && Document.ReturnReason is { } why)
+        {
+            <p class="muted note">Refund reason: @why</p>
+        }
         @if (Document.Kind == DocumentKind.DraftInvoice)
         {
             <p class="muted note">This is a draft invoice (quotation), not a tax invoice or receipt. Prices are valid until @Document.ValidUntil?.ToString("dd MMM yyyy").</p>

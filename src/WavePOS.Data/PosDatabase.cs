@@ -116,8 +116,111 @@ public class PosDatabase
 
         // Upgrades for databases created by earlier versions.
         AddColumnIfMissing(conn, "sales", "cashier_id", "INTEGER REFERENCES users(id)");
+        AddColumnIfMissing(conn, "sales", "customer_id", "INTEGER REFERENCES customers(id)");
+        AddColumnIfMissing(conn, "products", "cost_ngwee", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing(conn, "products", "reorder_level", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing(conn, "products", "family_id", "INTEGER REFERENCES product_families(id)");
+        AddColumnIfMissing(conn, "products", "option1", "TEXT");
+        AddColumnIfMissing(conn, "products", "option2", "TEXT");
+        AddColumnIfMissing(conn, "users", "employee_code", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(conn, "users", "phone", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(conn, "users", "email", "TEXT NOT NULL DEFAULT ''");
+
+        CreateRetailTables(conn);
 
         if (seedSampleProducts) SeedSampleProducts(conn);
+    }
+
+    /// <summary>Phase 1 retail tables: customers, variants, stock ledger, returns and the audit trail.</summary>
+    private static void CreateRetailTables(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS customers (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                code               TEXT    UNIQUE,
+                name               TEXT    NOT NULL,
+                phone              TEXT    NOT NULL DEFAULT '',
+                email              TEXT    NOT NULL DEFAULT '',
+                address            TEXT    NOT NULL DEFAULT '',
+                notes              TEXT    NOT NULL DEFAULT '',
+                marketing_consent  INTEGER NOT NULL DEFAULT 0,
+                consent_date       TEXT,
+                created_at         TEXT    NOT NULL,
+                is_anonymised      INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS ix_customers_phone ON customers(phone);
+
+            CREATE TABLE IF NOT EXISTS product_families (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                name          TEXT NOT NULL,
+                option1_name  TEXT,
+                option2_name  TEXT,
+                created_at    TEXT NOT NULL
+            );
+
+            -- Every stock change, so stock levels can always be explained.
+            CREATE TABLE IF NOT EXISTS stock_movements (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id     INTEGER NOT NULL REFERENCES products(id),
+                change         INTEGER NOT NULL,
+                balance_after  INTEGER NOT NULL,
+                reason         TEXT    NOT NULL,
+                note           TEXT    NOT NULL DEFAULT '',
+                reference      TEXT,
+                user_id        INTEGER REFERENCES users(id),
+                user_name      TEXT    NOT NULL DEFAULT '',
+                timestamp      TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_stock_movements_product ON stock_movements(product_id, id);
+
+            CREATE TABLE IF NOT EXISTS returns (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                sale_id         INTEGER NOT NULL REFERENCES sales(id),
+                timestamp       TEXT    NOT NULL,
+                user_id         INTEGER REFERENCES users(id),
+                reason          TEXT    NOT NULL,
+                note            TEXT    NOT NULL DEFAULT '',
+                refund_method   TEXT    NOT NULL,
+                total_ngwee     INTEGER NOT NULL,
+                vat_ngwee       INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS return_lines (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                return_id         INTEGER NOT NULL REFERENCES returns(id),
+                sale_line_id      INTEGER NOT NULL REFERENCES sale_lines(id),
+                product_id        INTEGER NOT NULL REFERENCES products(id),
+                product_name      TEXT    NOT NULL,
+                unit_price_ngwee  INTEGER NOT NULL,
+                quantity          INTEGER NOT NULL,
+                vat_rate          REAL    NOT NULL,
+                restocked         INTEGER NOT NULL
+            );
+
+            -- Append-only audit trail. Each row carries a hash of the previous row (see AuditEntry).
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id             INTEGER PRIMARY KEY,
+                timestamp_utc  TEXT    NOT NULL,
+                user_id        INTEGER,
+                user_name      TEXT    NOT NULL,
+                action         TEXT    NOT NULL,
+                entity_type    TEXT    NOT NULL,
+                entity_id      TEXT,
+                details        TEXT    NOT NULL,
+                previous_hash  TEXT    NOT NULL,
+                hash           TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_audit_action ON audit_log(action);
+            CREATE INDEX IF NOT EXISTS ix_audit_entity ON audit_log(entity_type, entity_id);
+
+            CREATE TRIGGER IF NOT EXISTS audit_log_no_update BEFORE UPDATE ON audit_log
+            BEGIN SELECT RAISE(ABORT, 'The audit log cannot be changed.'); END;
+
+            CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log
+            BEGIN SELECT RAISE(ABORT, 'The audit log cannot be deleted from.'); END;
+            """;
+        cmd.ExecuteNonQuery();
     }
 
     private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)
@@ -161,16 +264,21 @@ public class PosDatabase
         {
             using var insert = conn.CreateCommand();
             insert.Transaction = tx;
+            // Sample cost = 70% of the selling price; reorder at 10 units. Opening stock goes in the ledger.
             insert.CommandText = """
-                INSERT INTO products (sku, barcode, name, category, price_ngwee, vat_rate, stock_quantity)
-                VALUES ($sku, $barcode, $name, $cat, $price, $vat, 100);
+                INSERT INTO products (sku, barcode, name, category, price_ngwee, cost_ngwee, vat_rate, stock_quantity, reorder_level)
+                VALUES ($sku, $barcode, $name, $cat, $price, $cost, $vat, 100, 10);
+                INSERT INTO stock_movements (product_id, change, balance_after, reason, note, user_name, timestamp)
+                VALUES (last_insert_rowid(), 100, 100, 'InitialStock', 'Sample data', 'System', $now);
                 """;
             insert.Parameters.AddWithValue("$sku", p.sku);
             insert.Parameters.AddWithValue("$barcode", p.barcode);
             insert.Parameters.AddWithValue("$name", p.name);
             insert.Parameters.AddWithValue("$cat", p.cat);
             insert.Parameters.AddWithValue("$price", Core.Money.ToNgwee(p.price));
+            insert.Parameters.AddWithValue("$cost", Core.Money.ToNgwee(p.price * 0.7m));
             insert.Parameters.AddWithValue("$vat", (double)p.vat);
+            insert.Parameters.AddWithValue("$now", DateTime.Now.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
             insert.ExecuteNonQuery();
         }
         tx.Commit();

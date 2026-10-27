@@ -1,0 +1,124 @@
+@page "/inventory/new"
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ManageInventory))]
+@rendermode InteractiveServer
+@using WavePOS.Core.Inventory
+@inject ProductRepository Products
+@inject NavigationManager Navigation
+
+<PageTitle>Add product · WAVE POS</PageTitle>
+
+<div class="page narrow">
+    <p><a href="/inventory">← Inventory</a></p>
+    <h1>Add product</h1>
+
+    @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+
+    <section class="card">
+        <label class="field"><span>Product name</span><input @bind="_name" @bind:event="oninput" placeholder="e.g. Polo Shirt" /></label>
+        <div class="two-col">
+            <label class="field">
+                <span>Category</span>
+                <input list="categories" @bind="_category" placeholder="e.g. Clothing" />
+                <datalist id="categories">@foreach (var c in _categories) { <option value="@c"></option> }</datalist>
+            </label>
+            <label class="field"><span>SKU prefix (optional)</span><input @bind="_skuPrefix" @bind:event="oninput" placeholder="e.g. POLO" /></label>
+        </div>
+        <div class="three-col">
+            <label class="field"><span>Selling price (incl. VAT), K</span><input type="number" min="0" step="0.01" @bind="_price" /></label>
+            <label class="field"><span>Cost price, K</span><input type="number" min="0" step="0.01" @bind="_cost" /></label>
+            <label class="field">
+                <span>VAT</span>
+                <select @bind="_vatRate">
+                    <option value="0.16">16% standard</option>
+                    <option value="0">Exempt / zero-rated</option>
+                </select>
+            </label>
+        </div>
+        <div class="three-col">
+            <label class="field"><span>Opening stock @(HasVariants ? "(each variant)" : "")</span><input type="number" min="0" @bind="_openingStock" /></label>
+            <label class="field"><span>Reorder level</span><input type="number" min="0" @bind="_reorder" /></label>
+            @if (!HasVariants)
+            {
+                <label class="field"><span>Barcode (optional)</span><input @bind="_barcode" /></label>
+            }
+        </div>
+    </section>
+
+    <section class="card">
+        <label class="check"><input type="checkbox" @bind="_hasOptions" /> This product comes in different sizes, colours or styles</label>
+        @if (_hasOptions)
+        {
+            <p class="muted">Each combination becomes its own variant with its own SKU and stock. Separate values with commas.</p>
+            <div class="two-col">
+                <label class="field"><span>Option 1 name</span><input @bind="_opt1Name" @bind:event="oninput" placeholder="Size" /></label>
+                <label class="field"><span>Option 1 values</span><input @bind="_opt1Values" @bind:event="oninput" placeholder="S, M, L, XL" /></label>
+                <label class="field"><span>Option 2 name (optional)</span><input @bind="_opt2Name" @bind:event="oninput" placeholder="Colour" /></label>
+                <label class="field"><span>Option 2 values</span><input @bind="_opt2Values" @bind:event="oninput" placeholder="Black, White, Navy" /></label>
+            </div>
+        }
+        @if (Preview is { Count: > 0 } preview)
+        {
+            <h2 class="sub">@preview.Count @(preview.Count == 1 ? "item" : "variants") will be created</h2>
+            <div class="chips">
+                @foreach (var v in preview.Take(60)) { <span class="chip" title="@v.Sku">@v.Name</span> }
+                @if (preview.Count > 60) { <span class="muted">…and @(preview.Count - 60) more</span> }
+            </div>
+        }
+    </section>
+
+    <div class="actions-row">
+        <a class="btn" href="/inventory">Cancel</a>
+        <button type="button" class="btn primary" @onclick="Create" disabled="@_saving">Create product</button>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private List<string> _categories = [];
+    private string _name = "", _category = "", _skuPrefix = "", _barcode = "";
+    private decimal _price, _cost;
+    private decimal _vatRate = 0.16m;
+    private int _openingStock, _reorder;
+    private bool _hasOptions;
+    private string _opt1Name = "Size", _opt1Values = "", _opt2Name = "Colour", _opt2Values = "";
+    private string? _error;
+    private bool _saving;
+
+    protected override void OnInitialized() => _categories = Products.Categories();
+
+    private ProductOption? Option1 => _hasOptions && !string.IsNullOrWhiteSpace(_opt1Values) ? ProductOption.Parse(_opt1Name, _opt1Values) : null;
+    private ProductOption? Option2 => _hasOptions && !string.IsNullOrWhiteSpace(_opt2Values) ? ProductOption.Parse(_opt2Name, _opt2Values) : null;
+    private bool HasVariants => Option1 is not null || Option2 is not null;
+
+    private List<VariantSpec>? Preview
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_name)) return null;
+            try { return VariantBuilder.Build(_name, _skuPrefix, Option1, Option2); }
+            catch (ArgumentException) { return null; }
+        }
+    }
+
+    private async Task Create()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            var actor = (await AuthState).User.ToActor();
+            var created = Products.Create(new NewProductRequest(_name, _category, _skuPrefix, _price, _cost, _vatRate,
+                _reorder, _openingStock, Option1, Option2, _barcode), actor);
+            Navigation.NavigateTo($"/inventory/{created[0].Id}?created={created.Count}");
+        }
+        catch (ArgumentException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

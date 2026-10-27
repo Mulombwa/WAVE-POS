@@ -1,0 +1,191 @@
+@page "/returns"
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ProcessReturns))]
+@rendermode InteractiveServer
+@using System.Globalization
+@using WavePOS.Core.Returns
+@inject ReturnRepository ReturnData
+@inject SaleRepository Sales
+
+<PageTitle>Returns · WAVE POS</PageTitle>
+
+<div class="page">
+    <h1>Returns, refunds &amp; exchanges</h1>
+    <p class="muted">Find the sale by the receipt number. For an exchange, refund the item here, then sell the new one on the till.</p>
+
+    <section class="card">
+        <div class="lookup">
+            <label class="field">
+                <span>Receipt number</span>
+                <input @bind="_receiptText" @bind:event="oninput" @onkeydown="OnLookupKey" placeholder="e.g. 000123" inputmode="numeric" />
+            </label>
+            <button type="button" class="btn primary" @onclick="Lookup">Find sale</button>
+        </div>
+        @if (_error is not null) { <div class="alert error" role="alert">@_error</div> }
+        @if (_done is not null)
+        {
+            <div class="alert success" role="status">
+                Refund @_done processed.
+                <a href="/documents/refund/@_doneId" target="_blank" rel="noopener">Print refund slip</a>
+            </div>
+        }
+
+        @if (_receipt is not null)
+        {
+            <h2 class="sub">Sale #@_receipt.Number · @_receipt.Date.ToString("dd MMM yyyy HH:mm") · @Money.Format(_receipt.Total) by @_receipt.PaymentMethod?.DisplayName()
+                @if (_receipt.CustomerName is { } c) { <span> · @c</span> }</h2>
+
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Item</th><th class="num">Price</th><th class="num">Sold</th><th class="num">Returned</th><th class="num">Return now</th><th>Back in stock?</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in _lines)
+                        {
+                            <tr class="@(l.Line.QuantityRemaining == 0 ? "inactive" : "")">
+                                <td>@l.Line.ProductName</td>
+                                <td class="num">@Money.Format(l.Line.UnitPrice)</td>
+                                <td class="num">@l.Line.QuantitySold</td>
+                                <td class="num">@l.Line.QuantityAlreadyReturned</td>
+                                <td class="num">
+                                    <input class="qty-input" type="number" min="0" max="@l.Line.QuantityRemaining" @bind="l.Quantity"
+                                           disabled="@(l.Line.QuantityRemaining == 0)" aria-label="Quantity to return" />
+                                </td>
+                                <td><label class="check inline"><input type="checkbox" @bind="l.Restock" /> Restock</label></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="three-col">
+                <label class="field">
+                    <span>Reason</span>
+                    <select @bind="_reason">@foreach (var r in Enum.GetValues<ReturnReason>()) { <option value="@r">@ReasonLabel(r)</option> }</select>
+                </label>
+                <label class="field">
+                    <span>Refund by</span>
+                    <select @bind="_method">@foreach (var m in Enum.GetValues<PaymentMethod>()) { <option value="@m">@m.DisplayName()</option> }</select>
+                </label>
+                <label class="field"><span>Note</span><input @bind="_note" /></label>
+            </div>
+
+            <div class="row total refund-total">
+                <span>Refund total</span><strong>@Money.Format(RefundTotal)</strong>
+            </div>
+            <div class="actions-row">
+                <button type="button" class="btn primary" disabled="@(RefundTotal <= 0)" @onclick="Process">Process refund</button>
+            </div>
+        }
+    </section>
+
+    <section class="card">
+        <h2>Recent refunds</h2>
+        <div class="table-wrap">
+            <table class="data">
+                <thead><tr><th>Refund</th><th>Sale</th><th>Date</th><th>Reason</th><th class="num">Amount</th><th>Method</th><th>By</th></tr></thead>
+                <tbody>
+                    @foreach (var r in _recent)
+                    {
+                        <tr>
+                            <td><a href="/documents/refund/@r.Id" target="_blank" rel="noopener">R@(r.Id.ToString("D6"))</a></td>
+                            <td><a href="/documents/receipt/@r.SaleId" target="_blank" rel="noopener">@r.SaleId.ToString("D6")</a></td>
+                            <td>@r.Date.ToString("dd MMM yyyy HH:mm")</td>
+                            <td>@ReasonLabel(r.Reason)</td>
+                            <td class="num">@Money.Format(r.Total)</td>
+                            <td>@r.Method.DisplayName()</td>
+                            <td>@r.UserName</td>
+                        </tr>
+                    }
+                    @if (_recent.Count == 0) { <tr><td colspan="7" class="muted empty">No refunds yet.</td></tr> }
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "sale")] public long? SaleQuery { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private sealed class LineInput(ReturnableLine line)
+    {
+        public ReturnableLine Line { get; } = line;
+        public int Quantity { get; set; }
+        public bool Restock { get; set; } = true;
+    }
+
+    private string _receiptText = "";
+    private SalesDocument? _receipt;
+    private long _saleId;
+    private List<LineInput> _lines = [];
+    private ReturnReason _reason = ReturnReason.ChangedMind;
+    private PaymentMethod _method = PaymentMethod.Cash;
+    private string _note = "";
+    private string? _error, _done;
+    private long _doneId;
+    private List<ReturnSummary> _recent = [];
+
+    private decimal RefundTotal => _lines.Sum(l => l.Line.UnitPrice * Math.Clamp(l.Quantity, 0, l.Line.QuantityRemaining));
+
+    protected override void OnInitialized()
+    {
+        _recent = ReturnData.Recent();
+        if (SaleQuery is { } id)
+        {
+            _receiptText = id.ToString("D6");
+            Lookup();
+        }
+    }
+
+    private void OnLookupKey(KeyboardEventArgs e) { if (e.Key == "Enter") Lookup(); }
+
+    private void Lookup()
+    {
+        _error = null;
+        _receipt = null;
+        _lines = [];
+        if (!long.TryParse(_receiptText.Trim().TrimStart('#'), NumberStyles.None, CultureInfo.InvariantCulture, out var id))
+        {
+            _error = "Enter the receipt number printed on the receipt.";
+            return;
+        }
+        _receipt = Sales.GetReceipt(id);
+        if (_receipt is null)
+        {
+            _error = $"No sale with receipt number {id:D6}.";
+            return;
+        }
+        _saleId = id;
+        _method = _receipt.PaymentMethod ?? PaymentMethod.Cash; // refund the way they paid, by default
+        _lines = ReturnData.GetReturnable(id).Select(l => new LineInput(l)).ToList();
+        if (_lines.All(l => l.Line.QuantityRemaining == 0)) _error = "Everything on this sale has already been returned.";
+    }
+
+    private async Task Process()
+    {
+        _error = null;
+        try
+        {
+            var request = new ReturnRequest
+            {
+                SaleId = _saleId,
+                Lines = _lines.Where(l => l.Quantity > 0).Select(l => new ReturnLineRequest(l.Line.SaleLineId, l.Quantity, l.Restock)).ToList(),
+                Reason = _reason,
+                RefundMethod = _method,
+                Note = _note,
+            };
+            _doneId = ReturnData.Process(request, (await AuthState).User.ToActor());
+            _done = $"R{_doneId:D6}";
+            _receipt = null;
+            _lines = [];
+            _receiptText = "";
+            _note = "";
+            _recent = ReturnData.Recent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private static string ReasonLabel(ReturnReason r) => r.Label();
+}

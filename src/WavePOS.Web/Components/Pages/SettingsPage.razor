@@ -1,5 +1,5 @@
 @page "/settings"
-@attribute [Authorize(Policy = UserClaims.ManagerPolicy)]
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ManageSettings))]
 @rendermode InteractiveServer
 @inject SettingsRepository Settings
 @inject PosDatabase Db
@@ -83,6 +83,7 @@
 
 @code {
     [SupplyParameterFromQuery(Name = "saved")] public int? SavedQuery { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
 
     private BusinessProfile _profile = new();
     private PrintSettings _print = new();
@@ -141,7 +142,7 @@
         _useWaveLogo = true;
     }
 
-    private void Save()
+    private async Task Save()
     {
         _error = null;
         if (string.IsNullOrWhiteSpace(_profile.Name))
@@ -155,8 +156,9 @@
             if (_useWaveLogo) _profile.LogoPath = null;
             else if (_pendingLogo is not null) _profile.LogoPath = LogoUpload.Save(_pendingLogo, _pendingExtension!, Db.DataDirectory);
 
-            Settings.SaveBusinessProfile(_profile);
-            Settings.SavePrintSettings(_print);
+            var actor = (await AuthState).User.ToActor();
+            Settings.SaveBusinessProfile(_profile, actor);
+            Settings.SavePrintSettings(_print, actor);
         }
         catch (IOException ex)
         {

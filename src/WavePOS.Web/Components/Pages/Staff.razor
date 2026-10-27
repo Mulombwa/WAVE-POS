@@ -1,0 +1,146 @@
+@page "/staff"
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ManageStaff))]
+@rendermode InteractiveServer
+@inject UserRepository Users
+
+<PageTitle>Staff · WAVE POS</PageTitle>
+
+<div class="page">
+    <div class="page-head">
+        <h1>Staff</h1>
+        <button type="button" class="btn primary" @onclick="StartAdd">Add staff member</button>
+    </div>
+    <p class="muted">
+        <strong>Cashier</strong>: sell and look up customers.
+        <strong>Supervisor</strong>: also refunds, stock adjustments and customer edits.
+        <strong>Manager</strong>: everything, including staff, settings and the audit trail.
+    </p>
+
+    @if (_message is not null) { <div class="alert @(_messageIsError ? "error" : "success")" role="status">@_message</div> }
+
+    @if (_editing is not null)
+    {
+        <section class="card">
+            <h2>@(_editing.Id == 0 ? "New staff member" : $"Edit {_editing.DisplayName}")</h2>
+            <div class="two-col">
+                <label class="field"><span>Full name</span><input @bind="_editing.DisplayName" /></label>
+                <label class="field"><span>Username</span><input @bind="_editing.Username" disabled="@(_editing.Id != 0)" autocomplete="off" /></label>
+                <label class="field">
+                    <span>Role</span>
+                    <select @bind="_editing.Role">@foreach (var r in Enum.GetValues<UserRole>()) { <option value="@r">@r</option> }</select>
+                </label>
+                <label class="field"><span>Employee number</span><input @bind="_editing.EmployeeCode" /></label>
+                <label class="field"><span>Phone</span><input type="tel" @bind="_editing.Phone" /></label>
+                <label class="field"><span>Email</span><input type="email" @bind="_editing.Email" /></label>
+                @if (_editing.Id == 0)
+                {
+                    <label class="field"><span>Starting PIN or password</span><input type="password" @bind="_password" autocomplete="new-password" /></label>
+                }
+            </div>
+            @if (_editing.Id != 0)
+            {
+                <label class="check"><input type="checkbox" @bind="_editing.IsActive" /> Active (can sign in)</label>
+            }
+            <div class="actions-row">
+                <button type="button" class="btn" @onclick="() => _editing = null">Cancel</button>
+                <button type="button" class="btn primary" @onclick="Save">Save</button>
+            </div>
+        </section>
+    }
+
+    @if (_resetting is not null)
+    {
+        <section class="card">
+            <h2>New PIN for @_resetting.DisplayName</h2>
+            <p class="muted">Give it to them in person. They can't be signed in by anyone else's PIN.</p>
+            <label class="field"><span>New PIN or password</span><input type="password" @bind="_password" autocomplete="new-password" /></label>
+            <div class="actions-row">
+                <button type="button" class="btn" @onclick="() => _resetting = null">Cancel</button>
+                <button type="button" class="btn primary" @onclick="ResetPin">Set new PIN</button>
+            </div>
+        </section>
+    }
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Employee no.</th><th>Phone</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var u in _users)
+                {
+                    <tr class="@(u.IsActive ? "" : "inactive")">
+                        <td>@u.DisplayName</td>
+                        <td class="mono">@u.Username</td>
+                        <td>@u.Role</td>
+                        <td>@u.EmployeeCode</td>
+                        <td>@u.Phone</td>
+                        <td>@(u.IsActive ? "Active" : "Disabled")</td>
+                        <td>@(u.LastLogin?.ToString("dd MMM yyyy HH:mm") ?? "Never")</td>
+                        <td class="row-actions">
+                            <button type="button" class="btn small" @onclick="() => Edit(u)">Edit</button>
+                            <button type="button" class="btn small" @onclick="() => StartReset(u)">Reset PIN</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private List<User> _users = [];
+    private User? _editing, _resetting;
+    private string _password = "";
+    private string? _message;
+    private bool _messageIsError;
+
+    protected override void OnInitialized() => _users = Users.GetAll();
+
+    private void StartAdd() { _resetting = null; _password = ""; _editing = new User { Role = UserRole.Cashier }; }
+
+    private void Edit(User u)
+    {
+        _resetting = null;
+        _editing = new User
+        {
+            Id = u.Id, Username = u.Username, DisplayName = u.DisplayName, Role = u.Role, IsActive = u.IsActive,
+            EmployeeCode = u.EmployeeCode, Phone = u.Phone, Email = u.Email,
+        };
+    }
+
+    private void StartReset(User u) { _editing = null; _password = ""; _resetting = u; }
+
+    private async Task Save()
+    {
+        try
+        {
+            var actor = (await AuthState).User.ToActor();
+            if (_editing!.Id == 0) Users.Create(_editing, _password, actor);
+            else Users.Update(_editing, actor);
+            (_message, _messageIsError) = ($"Saved {_editing.DisplayName}.", false);
+            _editing = null;
+            _password = "";
+            _users = Users.GetAll();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            (_message, _messageIsError) = (ex.Message, true);
+        }
+    }
+
+    private async Task ResetPin()
+    {
+        try
+        {
+            Users.ResetPassword(_resetting!.Id, _password, (await AuthState).User.ToActor());
+            (_message, _messageIsError) = ($"New PIN set for {_resetting.DisplayName}.", false);
+            _resetting = null;
+            _password = "";
+        }
+        catch (ArgumentException ex)
+        {
+            (_message, _messageIsError) = (ex.Message, true);
+        }
+    }
+}

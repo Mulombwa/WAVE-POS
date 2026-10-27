@@ -7,6 +7,7 @@ public enum DocumentKind
 {
     Receipt,
     DraftInvoice,
+    Refund,
 }
 
 public record DocumentLine(long? ProductId, string Description, int Quantity, decimal UnitPrice, decimal VatRate)
@@ -42,7 +43,24 @@ public class SalesDocument
     // Draft invoices only
     public DateTime? ValidUntil { get; init; }
 
-    public string Title => Kind == DocumentKind.Receipt ? "RECEIPT" : "DRAFT INVOICE";
+    // Refunds only
+    public string? OriginalReceiptNumber { get; init; }
+    public string? ReturnReason { get; init; }
+
+    public string Title => Kind switch
+    {
+        DocumentKind.Receipt => "RECEIPT",
+        DocumentKind.Refund => "REFUND",
+        _ => "DRAFT INVOICE",
+    };
+
+    /// <summary>Label for the document number line.</summary>
+    public string NumberLabel => Kind switch
+    {
+        DocumentKind.Receipt => "Receipt no.",
+        DocumentKind.Refund => "Refund no.",
+        _ => "Invoice no.",
+    };
 
     public static SalesDocument FromSale(Sale sale, string cashierName) => new()
     {

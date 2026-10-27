@@ -1,9 +1,11 @@
 @page "/documents/receipt/{SaleId:long}"
 @page "/documents/draft/{Number}"
+@page "/documents/refund/{RefundId:long}"
 @attribute [Authorize]
 @layout BareLayout
 @inject SaleRepository Sales
 @inject DraftInvoiceRepository Drafts
+@inject ReturnRepository ReturnData
 @inject SettingsRepository Settings
 
 @* Static page with print styles: open it to view, or the till prints it through a hidden frame. *@
@@ -53,6 +55,7 @@
 @code {
     [Parameter] public long? SaleId { get; set; }
     [Parameter] public string? Number { get; set; }
+    [Parameter] public long? RefundId { get; set; }
     [SupplyParameterFromQuery(Name = "paper")] public string? PaperQuery { get; set; }
     [SupplyParameterFromQuery(Name = "embed")] public int? EmbedQuery { get; set; }
 
@@ -70,6 +73,11 @@
         if (SaleId is { } id)
         {
             _doc = Sales.GetReceipt(id);
+            _paper = Branding.ParsePaper(PaperQuery, print.ReceiptPaper);
+        }
+        else if (RefundId is { } refundId)
+        {
+            _doc = ReturnData.GetRefundDocument(refundId);
             _paper = Branding.ParsePaper(PaperQuery, print.ReceiptPaper);
         }
         else

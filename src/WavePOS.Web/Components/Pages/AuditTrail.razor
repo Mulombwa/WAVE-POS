@@ -1,0 +1,122 @@
+@page "/audit"
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ViewAuditLog))]
+@rendermode InteractiveServer
+@using System.Text
+@using WavePOS.Core.Audit
+@inject AuditRepository Audit
+@inject IJSRuntime JS
+
+<PageTitle>Audit trail · WAVE POS</PageTitle>
+
+<div class="page">
+    <div class="page-head">
+        <h1>Audit trail</h1>
+        <div class="actions-row left">
+            <button type="button" class="btn outline" @onclick="Verify">Check integrity</button>
+            <button type="button" class="btn" @onclick="DownloadCsv">Download CSV</button>
+        </div>
+    </div>
+    <p class="muted">Every sign-in, sale, refund, stock change, price change, customer data access and settings change. Entries can't be edited or deleted.</p>
+
+    @if (_verification is not null)
+    {
+        <div class="alert @(_verification.IsIntact ? "success" : "error")" role="status">
+            @(_verification.IsIntact ? "✔ " : "⚠ ")@_verification.Message
+        </div>
+    }
+
+    <div class="filters">
+        <select @bind="Category" aria-label="Category">
+            <option value="">All activity</option>
+            <option value="auth.">Sign-ins</option>
+            <option value="sale.">Sales &amp; refunds</option>
+            <option value="inventory.">Inventory</option>
+            <option value="customer.">Customers (personal data)</option>
+            <option value="staff.">Staff</option>
+            <option value="settings.">Settings</option>
+        </select>
+        <input type="search" placeholder="Search details or person…" @bind="Search" @bind:event="oninput" aria-label="Search" />
+        <label class="field inline"><span>From</span><input type="date" @bind="From" /></label>
+        <label class="field inline"><span>To</span><input type="date" @bind="To" /></label>
+    </div>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead><tr><th>#</th><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead>
+            <tbody>
+                @foreach (var e in _entries)
+                {
+                    <tr>
+                        <td class="mono">@e.Id</td>
+                        <td class="nowrap">@e.TimestampUtc.ToLocalTime().ToString("dd MMM yyyy HH:mm:ss")</td>
+                        <td>@e.UserName</td>
+                        <td><span class="badge @BadgeClass(e.Action)">@e.Action</span></td>
+                        <td>@e.Details</td>
+                    </tr>
+                }
+                @if (_entries.Count == 0) { <tr><td colspan="5" class="muted empty">No activity matches.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pager">
+        <button type="button" class="btn small" disabled="@(_page <= 1)" @onclick="() => Go(_page - 1)">← Newer</button>
+        <span class="muted">Page @_page of @Math.Max(1, (_total + PageSize - 1) / PageSize) · @_total entries</span>
+        <button type="button" class="btn small" disabled="@(_page * PageSize >= _total)" @onclick="() => Go(_page + 1)">Older →</button>
+    </div>
+</div>
+
+@code {
+    private const int PageSize = 50;
+    private List<AuditEntry> _entries = [];
+    private int _total, _page = 1;
+    private string _category = "", _search = "";
+    private DateTime? _from, _to;
+    private AuditVerification? _verification;
+
+    private string Category { get => _category; set { _category = value; Go(1); } }
+    private string Search { get => _search; set { _search = value; Go(1); } }
+    private DateTime? From { get => _from; set { _from = value; Go(1); } }
+    private DateTime? To { get => _to; set { _to = value; Go(1); } }
+
+    protected override void OnInitialized() => Go(1);
+
+    private AuditFilter Filter => new(
+        Action: _category.Length > 0 ? _category : null,
+        Search: _search,
+        FromUtc: _from?.Date.ToUniversalTime(),
+        ToUtc: _to?.Date.AddDays(1).ToUniversalTime());
+
+    private void Go(int page)
+    {
+        _page = page;
+        (_entries, _total) = Audit.Query(Filter, page, PageSize);
+    }
+
+    private void Verify() => _verification = Audit.Verify();
+
+    private async Task DownloadCsv()
+    {
+        var (rows, _) = Audit.Query(Filter, 1, 100_000);
+        var csv = new StringBuilder("id,timestamp_utc,user,action,entity,entity_id,details,hash\n");
+        foreach (var e in rows)
+            csv.AppendLine(string.Join(",", e.Id, e.TimestampUtc.ToString("o"), Csv(e.UserName), e.Action, e.EntityType,
+                Csv(e.EntityId ?? ""), Csv(e.Details), e.Hash));
+        await JS.InvokeVoidAsync("wavePos.download", $"wavepos-audit-{DateTime.Now:yyyyMMdd-HHmm}.csv", "text/csv", csv.ToString());
+    }
+
+    // Quote values, and stop spreadsheet apps treating text that starts with = + - @ as a formula.
+    private static string Csv(string value)
+    {
+        if (value.Length > 0 && "=+-@".Contains(value[0])) value = "'" + value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
+
+    private static string BadgeClass(string action) => action switch
+    {
+        _ when action.StartsWith("auth.login_failed") || action.StartsWith("auth.locked") => "danger",
+        _ when action.StartsWith("customer.") => "info",
+        _ when action.StartsWith("sale.return") || action.StartsWith("inventory.stock_adjusted") => "warn",
+        _ => "",
+    };
+}

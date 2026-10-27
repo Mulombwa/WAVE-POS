@@ -1,0 +1,107 @@
+@page "/inventory"
+@attribute [Authorize(Policy = nameof(WavePOS.Core.Security.Permission.ViewInventory))]
+@rendermode InteractiveServer
+@using WavePOS.Core.Security
+@inject ProductRepository Products
+@inject InventoryRepository InventoryData
+
+<PageTitle>Inventory · WAVE POS</PageTitle>
+
+<div class="page">
+    <div class="page-head">
+        <h1>Inventory</h1>
+        @if (_role.Can(Permission.ManageInventory))
+        {
+            <a class="btn primary" href="/inventory/new">Add product</a>
+        }
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat"><span>Products</span><strong>@_summary.ProductCount</strong></div>
+        <div class="stat"><span>Units in stock</span><strong>@_summary.TotalUnits.ToString("N0")</strong></div>
+        <div class="stat"><span>Stock value (cost)</span><strong>@Money.Format(_summary.StockValue)</strong></div>
+        <div class="stat"><span>Stock value (retail)</span><strong>@Money.Format(_summary.RetailValue)</strong></div>
+        <button type="button" class="stat warn @(_lowOnly ? "active" : "")" @onclick="ToggleLow">
+            <span>Low stock</span><strong>@_summary.LowStockCount</strong>
+        </button>
+        <div class="stat danger"><span>Out of stock</span><strong>@_summary.OutOfStockCount</strong></div>
+    </div>
+
+    <div class="filters">
+        <input type="search" placeholder="Search name, SKU or barcode…" @bind="Search" @bind:event="oninput" aria-label="Search products" />
+        <select @bind="Category" aria-label="Category">
+            <option value="">All categories</option>
+            @foreach (var c in _categories) { <option value="@c">@c</option> }
+        </select>
+        <label class="check inline"><input type="checkbox" @bind="LowOnly" /> Low stock only</label>
+        <label class="check inline"><input type="checkbox" @bind="ShowInactive" /> Show inactive</label>
+    </div>
+
+    <div class="table-wrap card">
+        <table class="data">
+            <thead>
+                <tr>
+                    <th>Product</th><th>SKU</th><th>Category</th>
+                    <th class="num">Price</th><th class="num">Cost</th><th class="num">Margin</th>
+                    <th class="num">In stock</th><th class="num">Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in _products)
+                {
+                    <tr class="@(p.IsActive ? "" : "inactive")">
+                        <td><a href="/inventory/@p.Id">@p.Name</a>@if (!p.IsActive) { <span class="badge">Inactive</span> }</td>
+                        <td class="mono">@p.Sku</td>
+                        <td>@p.Category</td>
+                        <td class="num">@Money.Format(p.Price)</td>
+                        <td class="num">@Money.Format(p.Cost)</td>
+                        <td class="num">@Margin(p)</td>
+                        <td class="num">
+                            @p.StockQuantity
+                            @if (p.StockQuantity <= 0) { <span class="badge danger">Out</span> }
+                            else if (p.IsLowStock) { <span class="badge warn">Low</span> }
+                        </td>
+                        <td class="num">@Money.Format(p.StockValue)</td>
+                    </tr>
+                }
+                @if (_products.Count == 0)
+                {
+                    <tr><td colspan="8" class="muted empty">No products match.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    private UserRole _role;
+    private InventorySummary _summary = new(0, 0, 0, 0, 0, 0);
+    private List<Product> _products = [];
+    private List<string> _categories = [];
+    private string _search = "";
+    private string _category = "";
+    private bool _lowOnly;
+    private bool _showInactive;
+
+    private string Search { get => _search; set { _search = value; Load(); } }
+    private string Category { get => _category; set { _category = value; Load(); } }
+    private bool LowOnly { get => _lowOnly; set { _lowOnly = value; Load(); } }
+    private bool ShowInactive { get => _showInactive; set { _showInactive = value; Load(); } }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = (await AuthState).User.ToUser().Role;
+        _categories = Products.Categories();
+        _summary = InventoryData.Summary();
+        Load();
+    }
+
+    private void ToggleLow() => LowOnly = !_lowOnly;
+
+    private void Load() => _products = Products.ListInventory(_search, _category, _lowOnly, _showInactive);
+
+    private static string Margin(Product p) =>
+        p.Price <= 0 ? "—" : $"{(p.Price / (1 + p.VatRate) - p.Cost) / (p.Price / (1 + p.VatRate)):P0}";
+}
